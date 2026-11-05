@@ -63,6 +63,10 @@ Launch directly into any video by passing a YouTube video ID or URL:
 cargo run --bin rustube -- dQw4w9WgXcQ
 ```
 
+## Implementation Plan & Roadmap
+
+For full architectural blueprints, data schemas, design tokens, and phased feature roadmaps, see [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md).
+
 ## License
 
 MIT OR Apache-2.0
