@@ -2,8 +2,12 @@ use iced::widget::{button, column, container, row, text};
 use iced::{Alignment, Element, Length};
 use crate::message::Message;
 use crate::router::Page;
+use crate::theme;
 use crate::utils::icons::icon;
 
+/// YouTube sidebar, expanded: 240px wide, items 40px tall, 24px icons,
+/// 24px icon-to-label gap, 14px labels, 10px corner radius.
+/// Hover and active both use `#272727`; active labels are Medium weight.
 pub fn view<'a>(expanded: bool) -> Element<'a, Message> {
     if !expanded {
         return container(
@@ -14,11 +18,11 @@ pub fn view<'a>(expanded: bool) -> Element<'a, Message> {
                 sidebar_item_mini("library", "You", Message::NavigateTo(Page::History)),
                 sidebar_item_mini("downloads", "Downloads", Message::NavigateTo(Page::Downloads)),
             ]
-            .spacing(18)
+            .spacing(0)
             .align_x(Alignment::Center)
             .width(Length::Fixed(72.0)),
         )
-        .padding([12, 0])
+        .padding([4, 0])
         .into();
     }
 
@@ -41,64 +45,91 @@ pub fn view<'a>(expanded: bool) -> Element<'a, Message> {
             divider(),
             sidebar_item_full("settings", "Settings", Message::NavigateTo(Page::Settings), false),
         ]
-        .spacing(3)
-        .width(Length::Fixed(220.0)),
+        .spacing(0)
+        .width(Length::Fixed(240.0)),
     )
-    .padding([8, 12])
+    .padding([12, 12])
     .into()
 }
 
 fn section_header<'a>(title: &'static str) -> Element<'a, Message> {
     container(
         text(title)
-            .size(14)
+            .size(16)
             .font(iced::Font {
-                weight: iced::font::Weight::Bold,
+                weight: iced::font::Weight::Medium,
                 ..Default::default()
             })
-            .color(iced::Color::from_rgb8(0xf1, 0xf1, 0xf1)),
+            .color(theme::TEXT),
     )
-    .padding([6, 12])
+    .padding(iced::Padding {
+        top: 8.0,
+        right: 12.0,
+        bottom: 4.0,
+        left: 12.0,
+    })
     .into()
 }
 
-fn sidebar_item_full<'a>(icon_name: &'static str, label: &'static str, msg: Message, active: bool) -> Element<'a, Message> {
-    let (bg, font_weight) = if active {
-        (Some(iced::Color::from_rgb8(0x27, 0x27, 0x27).into()), iced::font::Weight::Bold)
+fn item_style(
+    active: bool,
+) -> impl Fn(&iced::Theme, button::Status) -> button::Style {
+    move |_theme: &iced::Theme, status: button::Status| {
+        let background = if active {
+            Some(theme::CHIP_BG.into())
+        } else {
+            match status {
+                button::Status::Hovered | button::Status::Pressed => {
+                    Some(theme::CHIP_BG.into())
+                }
+                _ => None,
+            }
+        };
+        button::Style {
+            background,
+            text_color: theme::TEXT,
+            border: iced::Border {
+                radius: 10.0.into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+}
+
+fn sidebar_item_full<'a>(
+    icon_name: &'static str,
+    label: &'static str,
+    msg: Message,
+    active: bool,
+) -> Element<'a, Message> {
+    let weight = if active {
+        iced::font::Weight::Medium
     } else {
-        (None, iced::font::Weight::Normal)
+        iced::font::Weight::Normal
     };
 
     button(
         container(
             row![
-                icon(icon_name, 22),
+                icon(icon_name, 24),
                 text(label)
                     .size(14)
                     .font(iced::Font {
-                        weight: font_weight,
+                        weight,
                         ..Default::default()
                     })
-                    .color(iced::Color::from_rgb8(0xf1, 0xf1, 0xf1)),
+                    .color(theme::TEXT),
             ]
-            .spacing(22)
+            .spacing(24)
             .align_y(Alignment::Center),
         )
-        .padding([8, 12])
-        .style(move |_theme: &iced::Theme| {
-            container::Style {
-                background: bg,
-                border: iced::Border {
-                    radius: 10.0.into(),
-                    ..Default::default()
-                },
-                ..Default::default()
-            }
-        })
+        .padding([0, 12])
+        .height(Length::Fixed(40.0))
         .width(Length::Fill),
     )
     .on_press(msg)
-    .style(button::text)
+    .style(item_style(active))
     .padding(0)
     .width(Length::Fill)
     .into()
@@ -108,26 +139,22 @@ fn sidebar_item_mini<'a>(icon_name: &'static str, label: &'static str, msg: Mess
     button(
         container(
             column![
-                icon(icon_name, 22),
-                text(label).size(10).color(iced::Color::from_rgb8(0xf1, 0xf1, 0xf1)),
+                icon(icon_name, 24),
+                text(label).size(10).color(theme::TEXT),
             ]
             .spacing(6)
             .align_x(Alignment::Center),
         )
-        .padding([12, 4])
-        .style(|_theme: &iced::Theme| {
-            container::Style {
-                border: iced::Border {
-                    radius: 10.0.into(),
-                    ..Default::default()
-                },
-                ..Default::default()
-            }
+        .padding(iced::Padding {
+            top: 16.0,
+            right: 0.0,
+            bottom: 14.0,
+            left: 0.0,
         })
         .width(Length::Fill),
     )
     .on_press(msg)
-    .style(button::text)
+    .style(item_style(false))
     .padding(0)
     .width(Length::Fill)
     .into()
@@ -138,13 +165,8 @@ fn divider<'a>() -> Element<'a, Message> {
         container(text("").size(1))
             .height(Length::Fixed(1.0))
             .width(Length::Fill)
-            .style(|_theme: &iced::Theme| {
-                container::Style {
-                    background: Some(iced::Color::from_rgb8(0x27, 0x27, 0x27).into()),
-                    ..Default::default()
-                }
-            }),
+            .style(theme::solid_container(theme::DIVIDER, 0.0)),
     )
-    .padding([8, 0])
+    .padding([12, 12])
     .into()
 }

@@ -25,8 +25,15 @@ fn main() -> iced::Result {
         RustubeApp::update,
         RustubeApp::view,
     )
-    .default_font(Font::with_name("Inter"))
+    // Roboto is YouTube's font. Bundled (assets/fonts) so the UI looks
+    // identical on machines without Roboto installed; weights resolve
+    // through fontdb by their usWeightClass (400/500/700).
+    .font(include_bytes!("../../../assets/fonts/Roboto-Regular.ttf"))
+    .font(include_bytes!("../../../assets/fonts/Roboto-Medium.ttf"))
+    .font(include_bytes!("../../../assets/fonts/Roboto-Bold.ttf"))
+    .default_font(Font::with_name("Roboto"))
     .theme(|_| Theme::Dark)
+    .subscription(RustubeApp::subscription)
     .window(iced::window::Settings {
         size: iced::Size::new(1440.0, 900.0),
         min_size: Some(iced::Size::new(960.0, 600.0)),

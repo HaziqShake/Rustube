@@ -1,21 +1,44 @@
 use std::collections::HashMap;
+use std::time::Duration;
 use iced::widget::{button, column, container, image, row, scrollable, slider, text};
 use iced::{Alignment, Element, Length};
 use rustube_core::youtube::models::{VideoDetails, VideoItem};
 use crate::message::Message;
+use crate::theme;
+use crate::utils::format::{
+    format_count, format_duration, format_relative, format_subscriber_count,
+};
 use crate::utils::icons::icon;
 use crate::widgets::video_card;
 
+/// Live playback state polled from MPV (see `PlayerController::query_state`).
+#[derive(Debug, Clone, Copy)]
+pub struct PlayerViewState {
+    pub position: f64,
+    pub duration: f64,
+    pub paused: bool,
+    pub volume: u32,
+}
+
+/// Watch page: 16:9 player stage sized from the window width (the MPV
+/// child window is embedded at the exact same geometry), 20px title,
+/// channel row with real subscriber count, segmented like/dislike pill,
+/// `#272727` description box, and a 402px-ish "Up next" column.
 pub fn view<'a>(
     details: Option<&'a VideoDetails>,
     recommended: &'a [VideoItem],
-    thumbnails: &'a HashMap<String, Vec<u8>>,
+    thumbnails: &'a HashMap<String, iced::widget::image::Handle>,
+    stage_thumb: Option<&'a iced::widget::image::Handle>,
+    window_width: f32,
+    player: PlayerViewState,
 ) -> Element<'a, Message> {
     let Some(info) = details else {
         return container(
             column![
                 icon("play_center", 64),
-                text("Loading YouTube watch page...").size(16).color(iced::Color::from_rgb8(0xaa, 0xaa, 0xaa)),
+                text("Loading YouTube watch page...")
+                    .size(16)
+                    .color(theme::TEXT_SECONDARY),
             ]
             .spacing(16)
             .align_x(Alignment::Center),
@@ -28,17 +51,19 @@ pub fn view<'a>(
         .into();
     };
 
-    let thumb_bytes = thumbnails.get(&info.id);
+    // 1. Player stage, 16:9 of the primary column width.
+    let primary_w = (window_width - 40.0 - 24.0) * 7.0 / 10.0;
+    let stage_h = primary_w * 9.0 / 16.0;
 
-    // 1. YouTube Integrated Video Player Stage (16:9 Aspect Ratio)
-    let player_view: Element<'a, Message> = if let Some(bytes) = thumb_bytes {
+    let thumb_bytes = stage_thumb;
+    let player_view: Element<'a, Message> = if let Some(handle) = thumb_bytes {
         container(
-            image(image::Handle::from_bytes(bytes.clone()))
+            image(handle.clone())
                 .width(Length::Fill)
-                .height(Length::Fixed(510.0))
+                .height(Length::Fixed(stage_h)),
         )
         .width(Length::Fill)
-        .height(Length::Fixed(510.0))
+        .height(Length::Fixed(stage_h))
         .into()
     } else {
         container(
@@ -52,105 +77,133 @@ pub fn view<'a>(
             .align_x(Alignment::Center),
         )
         .width(Length::Fill)
-        .height(Length::Fixed(510.0))
+        .height(Length::Fixed(stage_h))
         .align_x(Alignment::Center)
         .align_y(Alignment::Center)
-        .style(|_theme: &iced::Theme| {
-            container::Style {
-                background: Some(iced::Color::BLACK.into()),
-                ..Default::default()
-            }
-        })
+        .style(theme::solid_container(iced::Color::BLACK, 0.0))
         .into()
     };
 
-    // YouTube Red Scrubber Progress Line
-    let scrubber_line = container(
-        slider(0.0..=100.0, 35.0, Message::SeekPercent)
-            .step(0.1)
-            .style(|_theme: &iced::Theme, _status: slider::Status| {
-                slider::Style {
-                    rail: slider::Rail {
-                        backgrounds: (
-                            iced::Background::Color(iced::Color::from_rgb8(0xff, 0x00, 0x00)),
-                            iced::Background::Color(iced::Color::from_rgb8(0x44, 0x44, 0x44)),
-                        ),
-                        width: 3.0,
-                        border: iced::Border {
-                            radius: 1.5.into(),
-                            ..Default::default()
-                        },
-                    },
-                    handle: slider::Handle {
-                        shape: slider::HandleShape::Circle { radius: 6.0 },
-                        background: iced::Background::Color(iced::Color::from_rgb8(0xff, 0x00, 0x00)),
-                        border_width: 0.0,
-                        border_color: iced::Color::TRANSPARENT,
-                    },
-                }
-            })
-    )
-    .width(Length::Fill)
-    .padding([0, 0]);
+    // Scrubber: real position/duration from MPV, red rail.
+    let duration = player.duration.max(1.0);
+    let scrubber = slider(0.0..=duration, player.position.min(duration), move |v| {
+        Message::SeekPercent(v / duration * 100.0)
+    })
+    .step(0.1)
+    .style(|_theme: &iced::Theme, _status: slider::Status| slider::Style {
+        rail: slider::Rail {
+            backgrounds: (
+                iced::Background::Color(theme::RED),
+                iced::Background::Color(iced::Color::from_rgb8(0x44, 0x44, 0x44)),
+            ),
+            width: 4.0,
+            border: iced::Border {
+                radius: 2.0.into(),
+                ..Default::default()
+            },
+        },
+        handle: slider::Handle {
+            shape: slider::HandleShape::Circle { radius: 6.0 },
+            background: iced::Background::Color(theme::RED),
+            border_width: 0.0,
+            border_color: iced::Color::TRANSPARENT,
+        },
+    });
 
-    // Bottom On-Screen Controls Bar (Exact YouTube controls bar)
+    let time_text = format!(
+        "{} / {}",
+        format_duration(Duration::from_secs_f64(player.position)),
+        format_duration(Duration::from_secs_f64(player.duration)),
+    );
+
+    let play_icon = if player.paused { "play" } else { "pause" };
     let left_controls = row![
-        button(icon("play", 20)).style(button::text).padding(6).on_press(Message::PlayPauseToggle),
-        button(icon("forward", 18)).style(button::text).padding(6).on_press(Message::SeekRelative(10.0)),
-        button(icon("volume", 20)).style(button::text).padding(6).on_press(Message::SetVolume(100)),
-        text("0:45 / 3:33").size(13).color(iced::Color::from_rgb8(0xdd, 0xdd, 0xdd)),
+        button(icon(play_icon, 20))
+            .style(theme::icon_button())
+            .padding(6)
+            .on_press(Message::PlayPauseToggle),
+        button(icon("back", 18))
+            .style(theme::icon_button())
+            .padding(6)
+            .on_press(Message::SeekRelative(-10.0)),
+        button(icon("forward", 18))
+            .style(theme::icon_button())
+            .padding(6)
+            .on_press(Message::SeekRelative(10.0)),
+        button(icon("volume", 20))
+            .style(theme::icon_button())
+            .padding(6),
+        slider(0.0..=100.0, player.volume as f64, |v| {
+            Message::SetVolume(v as u32)
+        })
+        .step(1.0)
+        .width(Length::Fixed(80.0))
+        .style(|_theme: &iced::Theme, _status: slider::Status| slider::Style {
+            rail: slider::Rail {
+                backgrounds: (
+                    iced::Background::Color(iced::Color::WHITE),
+                    iced::Background::Color(iced::Color::from_rgb8(0x66, 0x66, 0x66)),
+                ),
+                width: 4.0,
+                border: iced::Border {
+                    radius: 2.0.into(),
+                    ..Default::default()
+                },
+            },
+            handle: slider::Handle {
+                shape: slider::HandleShape::Circle { radius: 6.0 },
+                background: iced::Background::Color(iced::Color::WHITE),
+                border_width: 0.0,
+                border_color: iced::Color::TRANSPARENT,
+            },
+        }),
+        text(time_text)
+            .size(13)
+            .color(iced::Color::from_rgb8(0xdd, 0xdd, 0xdd)),
     ]
-    .spacing(12)
+    .spacing(8)
     .align_y(Alignment::Center);
 
     let right_controls = row![
-        button(icon("subtitles_cc", 20)).style(button::text).padding(6),
-        button(icon("settings", 18)).style(button::text).padding(6),
-        button(icon("pip", 18)).style(button::text).padding(6),
-        button(icon("fullscreen", 20)).style(button::text).padding(6).on_press(Message::PlayerToggleFullscreen),
+        button(icon("subtitles_cc", 20)).style(theme::icon_button()).padding(6),
+        button(icon("settings", 18)).style(theme::icon_button()).padding(6),
+        button(icon("pip", 18)).style(theme::icon_button()).padding(6),
+        button(icon("fullscreen", 20))
+            .style(theme::icon_button())
+            .padding(6)
+            .on_press(Message::PlayerToggleFullscreen),
     ]
-    .spacing(10)
+    .spacing(8)
     .align_y(Alignment::Center);
 
     let controls_row = row![
         left_controls,
-        container(right_controls).width(Length::Fill).align_x(Alignment::End),
+        container(right_controls)
+            .width(Length::Fill)
+            .align_x(Alignment::End),
     ]
     .spacing(16)
     .align_y(Alignment::Center)
     .padding([4, 12]);
 
     let complete_player_stage = container(
-        column![
-            player_view,
-            scrubber_line,
-            controls_row,
-        ]
-        .spacing(0),
+        column![player_view, scrubber, controls_row].spacing(0),
     )
     .width(Length::Fill)
-    .style(|_theme: &iced::Theme| {
-        container::Style {
-            background: Some(iced::Color::BLACK.into()),
-            border: iced::Border {
-                radius: 12.0.into(),
-                ..Default::default()
-            },
-            ..Default::default()
-        }
-    });
+    .style(theme::solid_container(iced::Color::BLACK, 12.0));
 
-    // 2. Video Title (YouTube 20px Bold)
+    // 2. Video title, 20px Bold.
     let title_text = text(&info.title)
         .size(20)
+        .line_height(iced::Pixels(28.0))
         .font(iced::Font {
             weight: iced::font::Weight::Bold,
             ..Default::default()
         })
-        .color(iced::Color::from_rgb8(0xf1, 0xf1, 0xf1))
+        .color(theme::TEXT)
         .width(Length::Fill);
 
-    // 3. Channel Info & Actions Bar (Exact YouTube Watch Metadata Row)
+    // 3. Channel row + actions.
     let channel_avatar = container(
         text(info.channel.name.chars().next().unwrap_or('?').to_string())
             .size(16)
@@ -160,29 +213,25 @@ pub fn view<'a>(
                 ..Default::default()
             }),
     )
-    .padding([10, 15])
-    .style(|_theme: &iced::Theme| {
-        container::Style {
-            background: Some(iced::Color::from_rgb8(0x44, 0x44, 0x44).into()),
-            border: iced::Border {
-                radius: 20.0.into(),
-                ..Default::default()
-            },
-            ..Default::default()
-        }
-    });
+    .width(Length::Fixed(40.0))
+    .height(Length::Fixed(40.0))
+    .align_x(Alignment::Center)
+    .align_y(Alignment::Center)
+    .style(theme::solid_container(theme::AVATAR_BG, 20.0));
 
+    let subs_text = info
+        .subscriber_count
+        .map(format_subscriber_count)
+        .unwrap_or_default();
     let channel_details = column![
         text(&info.channel.name)
             .size(16)
             .font(iced::Font {
-                weight: iced::font::Weight::Bold,
+                weight: iced::font::Weight::Medium,
                 ..Default::default()
             })
-            .color(iced::Color::from_rgb8(0xf1, 0xf1, 0xf1)),
-        text("4.56M subscribers")
-            .size(12)
-            .color(iced::Color::from_rgb8(0xaa, 0xaa, 0xaa)),
+            .color(theme::TEXT),
+        text(subs_text).size(12).color(theme::TEXT_SECONDARY),
     ]
     .spacing(2);
 
@@ -196,138 +245,109 @@ pub fn view<'a>(
                     ..Default::default()
                 }),
         )
-        .padding([8, 18])
-        .style(|_theme: &iced::Theme| {
-            container::Style {
-                background: Some(iced::Color::WHITE.into()),
-                border: iced::Border {
-                    radius: 18.0.into(),
-                    ..Default::default()
-                },
-                ..Default::default()
-            }
-        }),
+        .padding([10, 16])
+        .style(theme::solid_container(theme::WHITE, 18.0)),
     )
     .on_press(Message::SubscribeToggle)
-    .style(button::text)
+    .style(theme::ghost_button())
     .padding(0);
 
     let channel_box = row![channel_avatar, channel_details, subscribe_btn]
-        .spacing(16)
+        .spacing(12)
         .align_y(Alignment::Center);
 
-    // Action buttons: Like/Dislike segmented pill, Share, Download
+    let like_label = info
+        .like_count
+        .map(format_count)
+        .unwrap_or_default();
     let like_dislike_pill = container(
         row![
             button(
-                row![
-                    icon("like", 18),
-                    text("1.8M").size(13).color(iced::Color::WHITE),
-                ]
-                .spacing(6)
-                .align_y(Alignment::Center),
+                row![icon("like", 18), text(like_label).size(14).color(theme::TEXT)]
+                    .spacing(6)
+                    .align_y(Alignment::Center),
             )
             .on_press(Message::LikeToggle)
-            .style(button::text)
-            .padding([8, 14]),
-            text("|").size(14).color(iced::Color::from_rgb8(0x44, 0x44, 0x44)),
+            .style(theme::ghost_button())
+            .padding([8, 12]),
+            // Vertical divider line, not a "|" character.
+            container(text("").size(1))
+                .width(Length::Fixed(1.0))
+                .height(Length::Fixed(24.0))
+                .style(theme::solid_container(
+                    iced::Color::from_rgba(1.0, 1.0, 1.0, 0.2),
+                    0.0,
+                )),
             button(icon("dislike", 18))
                 .on_press(Message::LikeToggle)
-                .style(button::text)
-                .padding([8, 14]),
+                .style(theme::ghost_button())
+                .padding([8, 12]),
         ]
-        .spacing(2)
+        .spacing(0)
         .align_y(Alignment::Center),
     )
-    .style(|_theme: &iced::Theme| {
-        container::Style {
-            background: Some(iced::Color::from_rgb8(0x27, 0x27, 0x27).into()),
-            border: iced::Border {
-                radius: 18.0.into(),
-                ..Default::default()
-            },
-            ..Default::default()
-        }
-    });
+    .style(theme::solid_container(theme::CHIP_BG, 18.0));
 
-    let share_btn = button(
-        container(
-            row![icon("share", 18), text("Share").size(13).color(iced::Color::WHITE)]
-                .spacing(6)
-                .align_y(Alignment::Center),
+    let action_pill = |icon_name: &'static str, label: &'static str| {
+        button(
+            container(
+                row![icon(icon_name, 18), text(label).size(14).color(theme::TEXT)]
+                    .spacing(6)
+                    .align_y(Alignment::Center),
+            )
+            .padding([8, 16])
+            .style(theme::solid_container(theme::CHIP_BG, 18.0)),
         )
-        .padding([8, 16])
-        .style(|_theme: &iced::Theme| {
-            container::Style {
-                background: Some(iced::Color::from_rgb8(0x27, 0x27, 0x27).into()),
-                border: iced::Border {
-                    radius: 18.0.into(),
-                    ..Default::default()
-                },
-                ..Default::default()
-            }
-        }),
-    )
-    .style(button::text)
-    .padding(0);
+        .style(theme::ghost_button())
+        .padding(0)
+    };
 
-    let download_btn = button(
-        container(
-            row![icon("downloads", 18), text("Download").size(13).color(iced::Color::WHITE)]
-                .spacing(6)
-                .align_y(Alignment::Center),
-        )
-        .padding([8, 16])
-        .style(|_theme: &iced::Theme| {
-            container::Style {
-                background: Some(iced::Color::from_rgb8(0x27, 0x27, 0x27).into()),
-                border: iced::Border {
-                    radius: 18.0.into(),
-                    ..Default::default()
-                },
-                ..Default::default()
-            }
-        }),
-    )
-    .style(button::text)
-    .padding(0);
+    let actions_row = row![
+        like_dislike_pill,
+        action_pill("share", "Share"),
+        action_pill("downloads", "Download"),
+    ]
+    .spacing(8)
+    .align_y(Alignment::Center);
 
-    let actions_row = row![like_dislike_pill, share_btn, download_btn]
-        .spacing(10)
-        .align_y(Alignment::Center);
+    let meta_bar = row![
+        channel_box,
+        container(actions_row)
+            .width(Length::Fill)
+            .align_x(Alignment::End),
+    ]
+    .spacing(16)
+    .align_y(Alignment::Center)
+    .width(Length::Fill);
 
-    let meta_bar = row![channel_box, container(actions_row).width(Length::Fill).align_x(Alignment::End)]
-        .spacing(16)
-        .align_y(Alignment::Center)
-        .width(Length::Fill);
-
-    // 4. Description Box (YouTube #272727 Rounded Box)
-    let views_formatted = format!("{} views", info.view_count);
+    // 4. Description box, `#272727`, 12px radius.
+    let meta_line = match info.published_date {
+        Some(d) => format!(
+            "{} views • {}",
+            format_count(info.view_count),
+            format_relative(d)
+        ),
+        None => format!("{} views", format_count(info.view_count)),
+    };
     let desc_container = container(
         column![
-            text(format!("{} • Published on YouTube", views_formatted))
+            text(meta_line)
                 .size(14)
                 .font(iced::Font {
-                    weight: iced::font::Weight::Bold,
+                    weight: iced::font::Weight::Medium,
                     ..Default::default()
                 })
-                .color(iced::Color::from_rgb8(0xf1, 0xf1, 0xf1)),
-            text(&info.description).size(13).color(iced::Color::from_rgb8(0xee, 0xee, 0xee)),
+                .color(theme::TEXT),
+            text(&info.description)
+                .size(14)
+                .line_height(iced::Pixels(20.0))
+                .color(theme::TEXT),
         ]
         .spacing(8),
     )
-    .padding(16)
+    .padding(12)
     .width(Length::Fill)
-    .style(|_theme: &iced::Theme| {
-        container::Style {
-            background: Some(iced::Color::from_rgb8(0x22, 0x22, 0x22).into()),
-            border: iced::Border {
-                radius: 12.0.into(),
-                ..Default::default()
-            },
-            ..Default::default()
-        }
-    });
+    .style(theme::solid_container(theme::CHIP_BG, 12.0));
 
     let primary_column = column![
         complete_player_stage,
@@ -335,10 +355,10 @@ pub fn view<'a>(
         meta_bar,
         desc_container,
     ]
-    .spacing(16)
+    .spacing(12)
     .width(Length::FillPortion(7));
 
-    // 5. Right Sidebar ("Up next" with Compact Horizontal Cards)
+    // 5. Right column: "Up next" chips + compact cards.
     let rec_chips = row![
         sidebar_chip("All", true),
         sidebar_chip("From this channel", false),
@@ -346,24 +366,17 @@ pub fn view<'a>(
     ]
     .spacing(8);
 
-    let mut rec_col = column![
-        rec_chips,
-    ]
-    .spacing(12)
-    .width(Length::FillPortion(3));
+    let mut rec_col = column![rec_chips,].spacing(12).width(Length::FillPortion(3));
 
     for item in recommended.iter().take(10) {
         let thumb = thumbnails.get(&item.thumbnail_url);
         rec_col = rec_col.push(video_card::compact_view(item, thumb));
     }
 
-    let two_column_layout = row![
-        primary_column,
-        rec_col,
-    ]
-    .spacing(24)
-    .padding(20)
-    .width(Length::Fill);
+    let two_column_layout = row![primary_column, rec_col]
+        .spacing(24)
+        .padding(24)
+        .width(Length::Fill);
 
     scrollable(two_column_layout)
         .width(Length::Fill)
@@ -372,27 +385,35 @@ pub fn view<'a>(
 }
 
 fn sidebar_chip<'a>(label: &'static str, active: bool) -> Element<'a, Message> {
-    let (bg, fg) = if active {
-        (iced::Color::WHITE, iced::Color::BLACK)
+    let (bg, fg, weight) = if active {
+        (
+            theme::WHITE,
+            iced::Color::BLACK,
+            iced::font::Weight::Medium,
+        )
     } else {
-        (iced::Color::from_rgb8(0x27, 0x27, 0x27), iced::Color::WHITE)
+        (theme::CHIP_BG, theme::TEXT, iced::font::Weight::Normal)
     };
 
     button(
-        container(text(label).size(12).color(fg))
-            .padding([6, 12])
-            .style(move |_theme: &iced::Theme| {
-                container::Style {
-                    background: Some(bg.into()),
-                    border: iced::Border {
-                        radius: 8.0.into(),
-                        ..Default::default()
-                    },
+        container(text(label).size(14).color(fg).font(iced::Font {
+            weight,
+            ..Default::default()
+        }))
+        .padding([0, 12])
+        .height(Length::Fixed(32.0))
+        .style(move |_theme: &iced::Theme| {
+            container::Style {
+                background: Some(bg.into()),
+                border: iced::Border {
+                    radius: 8.0.into(),
                     ..Default::default()
-                }
-            }),
+                },
+                ..Default::default()
+            }
+        }),
     )
-    .style(button::text)
+    .style(theme::pill_button(bg, theme::HOVER_BG, 8.0))
     .padding(0)
     .into()
 }

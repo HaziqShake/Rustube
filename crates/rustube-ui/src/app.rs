@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use iced::widget::{column, row};
-use iced::{Element, Length, Task};
+use iced::{Element, Length, Size, Subscription, Task};
 use rustube_core::player::PlayerController;
 use rustube_core::youtube::client::YouTubeClient;
 use rustube_core::youtube::models::{VideoDetails, VideoItem};
@@ -8,18 +8,44 @@ use rustube_core::youtube::models::{VideoDetails, VideoItem};
 use crate::message::Message;
 use crate::pages::{home, search, watch};
 use crate::router::{Page, Router};
+use crate::utils::images;
 use crate::widgets::{sidebar, top_bar};
+
+/// Geometry of the embedded MPV stage on the watch page, derived from the
+/// window size so the video always sits exactly where the UI draws it.
+/// Watch page: no sidebar, 20px page padding, 24px gap between columns,
+/// primary column is 7/10 of the remaining width, stage is 16:9.
+pub fn player_stage_geometry(window: Size) -> (i32, i32, u32, u32) {
+    let primary_w = (window.width - 40.0 - 24.0) * 7.0 / 10.0;
+    let stage_h = primary_w * 9.0 / 16.0;
+    (20, 76, primary_w as u32, stage_h as u32)
+}
 
 pub struct RustubeApp {
     router: Router,
     search_input: String,
     sidebar_expanded: bool,
+    active_category: String,
+    window_size: Size,
     trending_videos: Vec<VideoItem>,
     search_results: Vec<VideoItem>,
     active_video: Option<VideoDetails>,
-    thumbnail_cache: HashMap<String, Vec<u8>>,
+    /// Thumbnail URL of the video open on the watch page, so the stage
+    /// can show its thumbnail while MPV spins up. (The thumbnail cache
+    /// is keyed by URL, and `VideoDetails` carries no thumbnail.)
+    active_thumb_url: Option<String>,
+    /// Decoded thumbnail handles, keyed by thumbnail URL. Handles are
+    /// created once when the image arrives and cloned (cheap) in `view`,
+    /// instead of re-decoding the bytes on every frame.
+    thumbnail_cache: HashMap<String, iced::widget::image::Handle>,
+    /// Circular-cropped channel avatars, keyed by avatar URL.
+    avatar_cache: HashMap<String, iced::widget::image::Handle>,
     youtube: YouTubeClient,
     player: PlayerController,
+    player_position: f64,
+    player_duration: f64,
+    player_paused: bool,
+    volume: u32,
 }
 
 impl RustubeApp {
@@ -36,7 +62,8 @@ impl RustubeApp {
             };
             let mut r = Router::new();
             r.navigate_to(Page::Watch(video_id.clone()));
-            let _ = player.play_embedded_at(&video_id, 24, 78, 940, 510);
+            let (x, y, w, h) = player_stage_geometry(Size::new(1440.0, 900.0));
+            let _ = player.play_embedded_at(&video_id, x, y, w, h);
             let yt_clone = youtube.clone();
             (
                 r,
@@ -71,12 +98,20 @@ impl RustubeApp {
                 router,
                 search_input: String::new(),
                 sidebar_expanded: true,
+                active_category: "All".to_string(),
+                window_size: Size::new(1440.0, 900.0),
                 trending_videos: Vec::new(),
                 search_results: Vec::new(),
                 active_video: None,
+                active_thumb_url: None,
                 thumbnail_cache: HashMap::new(),
+                avatar_cache: HashMap::new(),
                 youtube,
                 player,
+                player_position: 0.0,
+                player_duration: 0.0,
+                player_paused: false,
+                volume: 100,
             },
             initial_task,
         )
@@ -86,32 +121,114 @@ impl RustubeApp {
         String::from("Rustube - Native YouTube Client")
     }
 
+    pub fn subscription(&self) -> Subscription<Message> {
+        Subscription::batch([
+            iced::window::resize_events()
+                .map(|(_id, size)| Message::WindowResized(size)),
+            iced::time::every(std::time::Duration::from_millis(500))
+                .map(|_| Message::PlayerTick),
+        ])
+    }
+
+    /// Fetch thumbnails (rounded 12px) and channel avatars (circular) for a
+    /// list of videos. Images are processed once here, then stored as
+    /// handles; nothing is decoded during `view`.
+    fn fetch_images(&self, videos: &[VideoItem]) -> Task<Message> {
+        let mut tasks: Vec<Task<Message>> = Vec::new();
+
+        for v in videos {
+            let url = v.thumbnail_url.clone();
+            if !url.is_empty() && !self.thumbnail_cache.contains_key(&url) {
+                tasks.push(Task::perform(
+                    async move {
+                        let bytes = reqwest::get(&url)
+                            .await
+                            .map_err(|e| e.to_string())?
+                            .bytes()
+                            .await
+                            .map_err(|e| e.to_string())?
+                            .to_vec();
+                        let processed = images::rounded(&bytes, 12)
+                            .ok_or_else(|| "thumbnail decode failed".to_string())?;
+                        Ok::<(String, Vec<u8>), String>((url, processed))
+                    },
+                    |res| match res {
+                        Ok((url, bytes)) => Message::ThumbnailLoaded(url, bytes),
+                        Err(_) => Message::Noop,
+                    },
+                ));
+            }
+        }
+
+        // Avatars, deduplicated by URL.
+        let mut seen: Vec<String> = Vec::new();
+        for v in videos {
+            if let Some(url) = &v.channel.avatar_url {
+                if !url.is_empty()
+                    && !self.avatar_cache.contains_key(url)
+                    && !seen.contains(url)
+                {
+                    seen.push(url.clone());
+                    let url = url.clone();
+                    tasks.push(Task::perform(
+                        async move {
+                            let bytes = reqwest::get(&url)
+                                .await
+                                .map_err(|e| e.to_string())?
+                                .bytes()
+                                .await
+                                .map_err(|e| e.to_string())?
+                                .to_vec();
+                            let processed = images::circle(&bytes)
+                                .ok_or_else(|| "avatar decode failed".to_string())?;
+                            Ok::<(String, Vec<u8>), String>((url, processed))
+                        },
+                        |res| match res {
+                            Ok((url, bytes)) => Message::AvatarLoaded(url, bytes),
+                            Err(_) => Message::Noop,
+                        },
+                    ));
+                }
+            }
+        }
+
+        Task::batch(tasks)
+    }
+
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::NavigateTo(page) => {
-                // If moving away from Watch page, stop MPV and clean up child window
                 if matches!(self.router.current, Page::Watch(_)) && !matches!(page, Page::Watch(_)) {
                     self.player.stop();
                 }
                 self.router.navigate_to(page);
                 Task::none()
             }
-            Message::GoBack => {
-                if matches!(self.router.current, Page::Watch(_)) {
-                    self.player.stop();
-                }
-                self.router.go_back();
-                Task::none()
-            }
-            Message::GoForward => {
-                if matches!(self.router.current, Page::Watch(_)) {
-                    self.player.stop();
-                }
-                self.router.go_forward();
-                Task::none()
-            }
             Message::ToggleSidebar => {
                 self.sidebar_expanded = !self.sidebar_expanded;
+                Task::none()
+            }
+            Message::WindowResized(size) => {
+                self.window_size = size;
+                if matches!(self.router.current, Page::Watch(_)) {
+                    let (x, y, w, h) = player_stage_geometry(size);
+                    self.player.update_geometry(x, y, w, h);
+                }
+                Task::none()
+            }
+            Message::PlayerTick => {
+                if matches!(self.router.current, Page::Watch(_)) {
+                    let (pos, dur, paused) = self.player.query_state();
+                    if let Some(pos) = pos {
+                        self.player_position = pos;
+                    }
+                    if let Some(dur) = dur {
+                        self.player_duration = dur;
+                    }
+                    if let Some(paused) = paused {
+                        self.player_paused = paused;
+                    }
+                }
                 Task::none()
             }
             Message::SearchInputChanged(query) => {
@@ -136,26 +253,7 @@ impl RustubeApp {
             }
             Message::SearchResultsLoaded(Ok(results)) => {
                 self.search_results = results;
-                // Fetch thumbnails for search results
-                let tasks: Vec<Task<Message>> = self.search_results.iter().map(|v| {
-                    let url = v.thumbnail_url.clone();
-                    Task::perform(
-                        async move {
-                            if url.is_empty() {
-                                return Err("empty url".to_string());
-                            }
-                            let bytes = reqwest::get(&url).await.map_err(|e| e.to_string())?
-                                .bytes().await.map_err(|e| e.to_string())?
-                                .to_vec();
-                            Ok((url, bytes))
-                        },
-                        |res| match res {
-                            Ok((url, bytes)) => Message::ThumbnailLoaded(url, bytes),
-                            Err(_) => Message::Noop,
-                        },
-                    )
-                }).collect();
-                Task::batch(tasks)
+                self.fetch_images(&self.search_results)
             }
             Message::SearchResultsLoaded(Err(err)) => {
                 tracing::error!("Search error: {}", err);
@@ -163,40 +261,36 @@ impl RustubeApp {
             }
             Message::TrendingLoaded(Ok(videos)) => {
                 self.trending_videos = videos;
-                // Fetch thumbnails for trending videos
-                let tasks: Vec<Task<Message>> = self.trending_videos.iter().map(|v| {
-                    let url = v.thumbnail_url.clone();
-                    Task::perform(
-                        async move {
-                            if url.is_empty() {
-                                return Err("empty url".to_string());
-                            }
-                            let bytes = reqwest::get(&url).await.map_err(|e| e.to_string())?
-                                .bytes().await.map_err(|e| e.to_string())?
-                                .to_vec();
-                            Ok((url, bytes))
-                        },
-                        |res| match res {
-                            Ok((url, bytes)) => Message::ThumbnailLoaded(url, bytes),
-                            Err(_) => Message::Noop,
-                        },
-                    )
-                }).collect();
-                Task::batch(tasks)
+                self.fetch_images(&self.trending_videos)
             }
             Message::TrendingLoaded(Err(err)) => {
                 tracing::error!("Trending load error: {}", err);
                 Task::none()
             }
             Message::ThumbnailLoaded(url, bytes) => {
-                self.thumbnail_cache.insert(url, bytes);
+                self.thumbnail_cache
+                    .insert(url, iced::widget::image::Handle::from_bytes(bytes));
+                Task::none()
+            }
+            Message::AvatarLoaded(url, bytes) => {
+                self.avatar_cache
+                    .insert(url, iced::widget::image::Handle::from_bytes(bytes));
                 Task::none()
             }
             Message::OpenVideo(id) => {
+                self.active_thumb_url = self
+                    .trending_videos
+                    .iter()
+                    .chain(self.search_results.iter())
+                    .find(|v| v.id == id)
+                    .map(|v| v.thumbnail_url.clone());
                 self.router.navigate_to(Page::Watch(id.clone()));
                 self.active_video = None;
-                // Play embedded video at standard player coordinates (x=24, y=78, w=940, h=510)
-                let _ = self.player.play_embedded_at(&id, 24, 78, 940, 510);
+                self.player_position = 0.0;
+                self.player_duration = 0.0;
+                self.player_paused = false;
+                let (x, y, w, h) = player_stage_geometry(self.window_size);
+                let _ = self.player.play_embedded_at(&id, x, y, w, h);
                 let yt = self.youtube.clone();
                 Task::perform(
                     async move {
@@ -217,6 +311,7 @@ impl RustubeApp {
             }
             Message::PlayPauseToggle => {
                 self.player.toggle_pause();
+                self.player_paused = !self.player_paused;
                 Task::none()
             }
             Message::SeekRelative(seconds) => {
@@ -228,6 +323,7 @@ impl RustubeApp {
                 Task::none()
             }
             Message::SetVolume(vol) => {
+                self.volume = vol;
                 self.player.set_volume(vol);
                 Task::none()
             }
@@ -244,6 +340,7 @@ impl RustubeApp {
                 Task::none()
             }
             Message::FilterCategorySelected(category) => {
+                self.active_category = category.clone();
                 let yt = self.youtube.clone();
                 let query = if category == "All" { "Trending".to_string() } else { category };
                 Task::perform(
@@ -260,31 +357,61 @@ impl RustubeApp {
     }
 
     pub fn view(&self) -> Element<'_, Message> {
-        let top = top_bar::view(
-            &self.search_input,
-            self.router.can_go_back(),
-            self.router.can_go_forward(),
-        );
+        let top = top_bar::view(&self.search_input);
 
         let main_view: Element<Message> = match &self.router.current {
-            Page::Home => home::view(&self.trending_videos, &self.thumbnail_cache),
-            Page::Search(q) => search::view(q, &self.search_results, &self.thumbnail_cache),
-            Page::Watch(_) => watch::view(self.active_video.as_ref(), &self.trending_videos, &self.thumbnail_cache),
-            _ => home::view(&self.trending_videos, &self.thumbnail_cache),
+            Page::Home => home::view(
+                &self.trending_videos,
+                &self.thumbnail_cache,
+                &self.avatar_cache,
+                self.window_size.width,
+                self.sidebar_expanded,
+                &self.active_category,
+            ),
+            Page::Search(q) => search::view(
+                q,
+                &self.search_results,
+                &self.thumbnail_cache,
+                &self.avatar_cache,
+            ),
+            Page::Watch(_) => watch::view(
+                self.active_video.as_ref(),
+                &self.trending_videos,
+                &self.thumbnail_cache,
+                self.active_thumb_url
+                    .as_ref()
+                    .and_then(|url| self.thumbnail_cache.get(url)),
+                self.window_size.width,
+                watch::PlayerViewState {
+                    position: self.player_position,
+                    duration: self.player_duration,
+                    paused: self.player_paused,
+                    volume: self.volume,
+                },
+            ),
+            _ => home::view(
+                &self.trending_videos,
+                &self.thumbnail_cache,
+                &self.avatar_cache,
+                self.window_size.width,
+                self.sidebar_expanded,
+                &self.active_category,
+            ),
         };
 
+        // YouTube's masthead, sidebar and content are flush: no gaps.
         let is_watch_page = matches!(self.router.current, Page::Watch(_));
         let body: Element<Message> = if is_watch_page {
             main_view
         } else {
             row![sidebar::view(self.sidebar_expanded), main_view]
-                .spacing(12)
+                .spacing(0)
                 .width(Length::Fill)
                 .into()
         };
 
         column![top, body]
-            .spacing(8)
+            .spacing(0)
             .width(Length::Fill)
             .height(Length::Fill)
             .into()

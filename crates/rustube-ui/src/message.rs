@@ -1,11 +1,10 @@
+use iced::Size;
 use rustube_core::youtube::models::{VideoDetails, VideoItem};
 use crate::router::Page;
 
 #[derive(Debug, Clone)]
 pub enum Message {
     NavigateTo(Page),
-    GoBack,
-    GoForward,
     ToggleSidebar,
 
     SearchInputChanged(String),
@@ -17,6 +16,10 @@ pub enum Message {
     VideoDetailsLoaded(Result<VideoDetails, String>),
 
     ThumbnailLoaded(String, Vec<u8>),
+    AvatarLoaded(String, Vec<u8>),
+
+    WindowResized(Size),
+    PlayerTick,
 
     PlayPauseToggle,
     SeekRelative(f64),

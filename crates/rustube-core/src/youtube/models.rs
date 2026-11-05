@@ -30,6 +30,7 @@ pub struct VideoDetails {
     pub channel: ChannelBadge,
     pub view_count: u64,
     pub like_count: Option<u64>,
+    pub subscriber_count: Option<u64>,
     pub published_date: Option<DateTime<Utc>>,
     pub tags: Vec<String>,
     pub chapters: Vec<Chapter>,

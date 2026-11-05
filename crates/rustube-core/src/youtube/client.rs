@@ -1,9 +1,33 @@
 use std::sync::Arc;
 use rustypipe::client::RustyPipe;
-use rustypipe::model::YouTubeItem;
+use rustypipe::model::{Thumbnail, YouTubeItem};
 use thiserror::Error;
 
 use super::models::*;
+
+/// Pick the smallest thumbnail that is at least `min_width` wide.
+/// YouTube serves the same image at 120 (default), 320 (mqdefault),
+/// 480 (hqdefault), 640 (sddefault) and 1280 (maxres) px. Taking the
+/// first entry used to grab the 120px one and upscale it ~3x, which is
+/// why thumbnails looked blurry. Grid cards are ~360px wide, so 320px
+/// (mqdefault) is the right, lightweight choice; fall back to the
+/// largest available when nothing meets the minimum.
+pub fn pick_thumbnail(thumbs: &[Thumbnail], min_width: u32) -> String {
+    let mut best: Option<&Thumbnail> = None;
+    for t in thumbs {
+        if t.width >= min_width && best.map_or(true, |b| t.width < b.width) {
+            best = Some(t);
+        }
+    }
+    if let Some(t) = best {
+        return t.url.clone();
+    }
+    thumbs
+        .iter()
+        .max_by_key(|t| t.width)
+        .map(|t| t.url.clone())
+        .unwrap_or_default()
+}
 
 #[derive(Error, Debug)]
 pub enum YouTubeError {
@@ -40,7 +64,7 @@ impl YouTubeClient {
 
         for item in search_res.items.items {
             if let YouTubeItem::Video(v) = item {
-                let thumbnail_url = v.thumbnail.first().map(|t| t.url.clone()).unwrap_or_default();
+                let thumbnail_url = pick_thumbnail(&v.thumbnail, 320);
                 let (chan_id, chan_name, avatar_url) = if let Some(ch) = v.channel {
                     let av = ch.avatar.first().map(|a| a.url.clone());
                     (ch.id, ch.name, av)
@@ -71,7 +95,7 @@ impl YouTubeClient {
 
     pub async fn get_video_details(&self, id: &str) -> Result<VideoDetails, YouTubeError> {
         let player = self.client.query().player(id).await?;
-        let video_details = VideoDetails {
+        let mut video_details = VideoDetails {
             id: player.details.id.clone(),
             title: player.details.name.clone().unwrap_or_default(),
             description: player.details.description.clone().unwrap_or_default(),
@@ -83,6 +107,7 @@ impl YouTubeClient {
             },
             view_count: player.details.view_count.unwrap_or(0),
             like_count: None,
+            subscriber_count: None,
             published_date: None,
             tags: player.details.keywords.clone(),
             chapters: Vec::new(),
@@ -119,6 +144,17 @@ impl YouTubeClient {
                 })
                 .collect(),
         };
+
+        // Best effort: show the real subscriber count instead of a made-up
+        // number. A hidden count (or a failed lookup) just hides the line.
+        if let Ok(ch) = self
+            .client
+            .query()
+            .channel_info(&video_details.channel.id)
+            .await
+        {
+            video_details.subscriber_count = ch.subscriber_count;
+        }
 
         Ok(video_details)
     }

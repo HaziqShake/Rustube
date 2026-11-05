@@ -11,11 +11,11 @@ Built with **Iced** GUI and hardware-accelerated playback via **MPV**, designed 
 - **Pure Native Rust UI**: Built with [Iced](https://github.com/iced-rs/iced) (`wgpu`), with zero Electron bloat.
 - **YouTube Dark Theme**: Pixel-perfect replication of YouTube's desktop web UI:
   - Official vector SVG icons.
-  - Inter sans-serif typography.
+  - Roboto typography (bundled, same as youtube.com).
   - YouTube search pill with dedicated search and voice input buttons.
   - Multi-section sidebar navigation (Home, Shorts, Subscriptions, Library, History, Downloads, Explore, Settings).
   - Category filter pills (*All*, *Gaming*, *Music*, *News*, *Podcasts*, *Live*, *Coding*, *Recently uploaded*, *Watched*).
-  - 16:9 responsive video card grid with rounded corners and duration timestamp badges.
+  - Responsive 16:9 video card grid with rounded corners, real channel avatars and duration timestamp badges overlaid on the thumbnails.
 - **Embedded In-App Video Playback**:
   - Direct X11 child subwindow embedding right into the watch page stage.
   - YouTube Red (`#ff0000`) seek scrubber progress line.

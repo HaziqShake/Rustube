@@ -224,6 +224,61 @@ impl PlayerController {
         Self::send_ipc(r#"{"command": ["cycle", "fullscreen"]}"#);
     }
 
+    /// Query live playback state from MPV over the IPC socket.
+    /// Returns (position_secs, duration_secs, paused). Each property is a
+    /// separate short-lived connection with a 300ms read timeout, so a
+    /// dead or busy MPV never blocks the UI thread for long.
+    /// `None` per field means "unknown right now", not an error.
+    pub fn query_state(&self) -> (Option<f64>, Option<f64>, Option<bool>) {
+        (
+            Self::get_property_f64("time-pos"),
+            Self::get_property_f64("duration"),
+            Self::get_property_bool("pause"),
+        )
+    }
+
+    fn get_property_f64(name: &str) -> Option<f64> {
+        Self::get_property(name)?.as_f64()
+    }
+
+    fn get_property_bool(name: &str) -> Option<bool> {
+        Self::get_property(name)?.as_bool()
+    }
+
+    fn get_property(name: &str) -> Option<serde_json::Value> {
+        use std::io::{BufRead, BufReader, Write};
+        use std::os::unix::net::UnixStream;
+        use std::time::Duration as StdDuration;
+
+        let mut stream = UnixStream::connect("/tmp/rustube_mpv.sock").ok()?;
+        let _ = stream.set_read_timeout(Some(StdDuration::from_millis(300)));
+        let _ = stream.set_write_timeout(Some(StdDuration::from_millis(300)));
+        let cmd = format!(
+            r#"{{"command": ["get_property", "{}"], "request_id": 1}}"#,
+            name
+        );
+        writeln!(stream, "{}", cmd).ok()?;
+
+        let mut reader = BufReader::new(stream);
+        let mut line = String::new();
+        // MPV answers each request with exactly one JSON object.
+        for _ in 0..5 {
+            line.clear();
+            if reader.read_line(&mut line).ok()? == 0 {
+                return None;
+            }
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line) {
+                if json.get("request_id").and_then(|v| v.as_u64()) == Some(1) {
+                    if json.get("error").and_then(|e| e.as_str()) == Some("success") {
+                        return json.get("data").cloned();
+                    }
+                    return None;
+                }
+            }
+        }
+        None
+    }
+
     fn send_ipc(cmd: &str) {
         use std::io::Write;
         use std::os::unix::net::UnixStream;
