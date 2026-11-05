@@ -1,0 +1,19 @@
+[package]
+name = "rustube-ui"
+version.workspace = true
+edition.workspace = true
+description = "GUI frontend for Rustube YouTube client"
+
+[[bin]]
+name = "rustube"
+path = "src/main.rs"
+
+[dependencies]
+rustube-core = { path = "../rustube-core" }
+iced = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+chrono = { workspace = true }
+image = { workspace = true }
+reqwest = { workspace = true }

@@ -1,0 +1,63 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/rustube-core",
+    "crates/rustube-ui",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+authors = ["Haziq"]
+license = "MIT OR Apache-2.0"
+description = "A blazingly fast, native YouTube desktop client written in Rust"
+repository = "https://github.com/haziq/rustube"
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# YouTube API
+rustypipe = { version = "0.11", default-features = false, features = ["rustls-tls-native-roots"] }
+
+# HTTP
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+
+# Database
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+# Image processing
+image = "0.25"
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Cross-platform paths
+directories = "6"
+
+# GUI
+iced = { version = "0.13", features = ["tokio", "image", "svg"] }
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+strip = true
+opt-level = 2
+panic = "abort"
+
+[profile.release-small]
+inherits = "release"
+opt-level = "s"
