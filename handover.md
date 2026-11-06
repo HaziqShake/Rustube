@@ -169,7 +169,33 @@ cargo build --release --bin rustube
 
 ---
 
-## 6. Phase Two Roadmap & Next Steps
+## 6. Skills & Tooling Applied
+
+The development, reverse engineering, visual redesign, and debugging of Rustube leveraged the following specialized skills, plugins, and tooling:
+
+1. **`figma-create-new-file`**:
+   - Used to programmatically initialize and link the official Figma design file under the authenticated team workspace (`Hi Hello's team`), creating the persistent canvas: [Rustube Figma Design](https://www.figma.com/design/yI5vC6ppPW3LPwCspvV1TG).
+
+2. **`figma-code-workflows`**:
+   - Packaged and imported the complete interactive HTML/CSS YouTube desktop clone (tokens, layout, masthead, sidebar, chips, grid, and watch page) into Figma via `send_code_to_figma`.
+
+3. **`figma-use` / Figma MCP Suite**:
+   - Used Figma MCP server integration (`whoami`, `create_new_file`, `send_code_to_figma`) to bridge UI design specifications with native code implementations.
+
+4. **Web Reverse-Engineering & Headless Snapshot Analysis (`reverse-engineer-anything`)**:
+   - Executed headless browser automation (`firefox --headless --screenshot`) against live `youtube.com` to analyze DOM wireframes, layout reflow ratios (3-to-4 columns), typography scales (14px, 16px, 18px, 20px), design tokens (`#0f0f0f`, `#121212`, `#222222`, `#272727`, `#303030`, `#3ea6ff`), and exact spacing hierarchies.
+
+5. **Multi-Agent Concurrent Auditing (`subagents`)**:
+   - Spawned multiple specialized background subagents to perform simultaneous codebase audits:
+     - **Runtime & Performance Auditor**: Deeply analyzed asynchronous execution paths, identified UI-thread blocking sleeps in `find_rustube_window`, IPC socket timeouts in `query_state`, and diagnosed the unconstrained flex height bug preventing scrolling in Iced.
+     - **Visual Design & UI Polish Auditor**: Diagnosed the mathematical quadrant scanning bug in `apply_rounded_mask` that caused corner square artifacts, standardized view counts to 1 decimal place, centered glyph alignments, and designed the YouTube skeleton card component.
+
+6. **Desktop Display & X11 Automation (`x11rb`, `xprop`, `import`, `spectacle`)**:
+   - Utilized X11 protocol introspection (`_NET_CLIENT_LIST`, `_NET_WM_PID`, `WM_NAME`) for embedding child subwindows, capturing runtime visual proofs, and verifying pixel-level layout correctness.
+
+---
+
+## 7. Phase Two Roadmap & Next Steps
 
 1. **Comments Section**:
    - Integrate YouTube comment thread fetching under the watch page description box.
