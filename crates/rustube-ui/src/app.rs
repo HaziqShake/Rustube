@@ -13,12 +13,13 @@ use crate::widgets::{sidebar, top_bar};
 
 /// Geometry of the embedded MPV stage on the watch page, derived from the
 /// window size so the video always sits exactly where the UI draws it.
-/// Watch page: no sidebar, 20px page padding, 24px gap between columns,
-/// primary column is 7/10 of the remaining width, stage is 16:9.
+/// Watch page: 24px left padding, 80px top (56px masthead + 24px page padding),
+/// primary column is 70% of available width up to 1280px, stage is 16:9.
 pub fn player_stage_geometry(window: Size) -> (i32, i32, u32, u32) {
-    let primary_w = (window.width - 40.0 - 24.0) * 7.0 / 10.0;
+    let available_w = (window.width - 72.0).max(800.0);
+    let primary_w = (available_w * 0.70).min(1280.0);
     let stage_h = primary_w * 9.0 / 16.0;
-    (20, 76, primary_w as u32, stage_h as u32)
+    (24, 80, primary_w as u32, stage_h as u32)
 }
 
 pub struct RustubeApp {
@@ -65,17 +66,29 @@ impl RustubeApp {
             let (x, y, w, h) = player_stage_geometry(Size::new(1440.0, 900.0));
             let _ = player.play_embedded_at(&video_id, x, y, w, h);
             let yt_clone = youtube.clone();
+            let yt_clone2 = youtube.clone();
             (
                 r,
-                Task::perform(
-                    async move {
-                        yt_clone
-                            .get_video_details(&video_id)
-                            .await
-                            .map_err(|e| e.to_string())
-                    },
-                    Message::VideoDetailsLoaded,
-                ),
+                Task::batch([
+                    Task::perform(
+                        async move {
+                            yt_clone
+                                .get_video_details(&video_id)
+                                .await
+                                .map_err(|e| e.to_string())
+                        },
+                        Message::VideoDetailsLoaded,
+                    ),
+                    Task::perform(
+                        async move {
+                            yt_clone2
+                                .search("Trending", &Default::default())
+                                .await
+                                .map_err(|e| e.to_string())
+                        },
+                        Message::TrendingLoaded,
+                    ),
+                ]),
             )
         } else {
             let yt_clone = youtube.clone();
@@ -292,14 +305,28 @@ impl RustubeApp {
                 let (x, y, w, h) = player_stage_geometry(self.window_size);
                 let _ = self.player.play_embedded_at(&id, x, y, w, h);
                 let yt = self.youtube.clone();
-                Task::perform(
+                let fetch_details = Task::perform(
                     async move {
                         yt.get_video_details(&id)
                             .await
                             .map_err(|e| e.to_string())
                     },
                     Message::VideoDetailsLoaded,
-                )
+                );
+                if self.trending_videos.is_empty() {
+                    let yt2 = self.youtube.clone();
+                    let fetch_trending = Task::perform(
+                        async move {
+                            yt2.search("Trending", &Default::default())
+                                .await
+                                .map_err(|e| e.to_string())
+                        },
+                        Message::TrendingLoaded,
+                    );
+                    Task::batch([fetch_details, fetch_trending])
+                } else {
+                    fetch_details
+                }
             }
             Message::VideoDetailsLoaded(Ok(details)) => {
                 self.active_video = Some(details);

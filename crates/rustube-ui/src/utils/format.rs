@@ -41,6 +41,38 @@ pub fn format_subscriber_count(count: u64) -> String {
     format!("{} subscribers", format_count(count))
 }
 
+/// Clean title/text to remove emojis and non-standard symbols that the bundled Roboto font lacks,
+/// preventing ugly missing-glyph boxes like `[]`.
+pub fn clean_text(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for ch in input.chars() {
+        let code = ch as u32;
+        let is_emoji_or_missing = (0x1F300..=0x1FAFF).contains(&code)
+            || (0x2600..=0x27BF).contains(&code)
+            || (0xFE00..=0xFE0F).contains(&code)
+            || (0x200D == code)
+            || (0x2300..=0x23FF).contains(&code)
+            || (0x2B50..=0x2B55).contains(&code);
+        if !is_emoji_or_missing && !ch.is_control() {
+            out.push(ch);
+        }
+    }
+    let mut cleaned = String::with_capacity(out.len());
+    let mut last_was_space = false;
+    for ch in out.chars() {
+        if ch.is_whitespace() {
+            if !last_was_space {
+                cleaned.push(' ');
+                last_was_space = true;
+            }
+        } else {
+            cleaned.push(ch);
+            last_was_space = false;
+        }
+    }
+    cleaned.trim().to_string()
+}
+
 /// "3 days ago" style relative time for the watch page description.
 /// Returns None when the date is missing.
 pub fn format_relative(date: chrono::DateTime<chrono::Utc>) -> String {

@@ -6,7 +6,7 @@ use rustube_core::youtube::models::{VideoDetails, VideoItem};
 use crate::message::Message;
 use crate::theme;
 use crate::utils::format::{
-    format_count, format_duration, format_relative, format_subscriber_count,
+    clean_text, format_count, format_duration, format_relative, format_subscriber_count,
 };
 use crate::utils::icons::icon;
 use crate::widgets::video_card;
@@ -20,10 +20,8 @@ pub struct PlayerViewState {
     pub volume: u32,
 }
 
-/// Watch page: 16:9 player stage sized from the window width (the MPV
-/// child window is embedded at the exact same geometry), 20px title,
-/// channel row with real subscriber count, segmented like/dislike pill,
-/// `#272727` description box, and a 402px-ish "Up next" column.
+/// Watch page: 16:9 player stage, video title, channel row with subscribe pill,
+/// segmented like/dislike pill, `#272727` description box, and "Up next" recommendation column.
 pub fn view<'a>(
     details: Option<&'a VideoDetails>,
     recommended: &'a [VideoItem],
@@ -52,7 +50,8 @@ pub fn view<'a>(
     };
 
     // 1. Player stage, 16:9 of the primary column width.
-    let primary_w = (window_width - 40.0 - 24.0) * 7.0 / 10.0;
+    let available_w = (window_width - 72.0).max(800.0);
+    let primary_w = (available_w * 0.70).min(1280.0);
     let stage_h = primary_w * 9.0 / 16.0;
 
     let thumb_bytes = stage_thumb;
@@ -66,22 +65,11 @@ pub fn view<'a>(
         .height(Length::Fixed(stage_h))
         .into()
     } else {
-        container(
-            column![
-                icon("play_center", 64),
-                text("Embedded YouTube Player Active")
-                    .size(15)
-                    .color(iced::Color::from_rgb8(0xee, 0xee, 0xee)),
-            ]
-            .spacing(12)
-            .align_x(Alignment::Center),
-        )
-        .width(Length::Fill)
-        .height(Length::Fixed(stage_h))
-        .align_x(Alignment::Center)
-        .align_y(Alignment::Center)
-        .style(theme::solid_container(iced::Color::BLACK, 0.0))
-        .into()
+        container(text("").size(1))
+            .width(Length::Fill)
+            .height(Length::Fixed(stage_h))
+            .style(theme::solid_container(iced::Color::BLACK, 0.0))
+            .into()
     };
 
     // Scrubber: real position/duration from MPV, red rail.
@@ -193,7 +181,8 @@ pub fn view<'a>(
     .style(theme::solid_container(iced::Color::BLACK, 12.0));
 
     // 2. Video title, 20px Bold.
-    let title_text = text(&info.title)
+    let clean_title = clean_text(&info.title);
+    let title_text = text(clean_title)
         .size(20)
         .line_height(iced::Pixels(28.0))
         .font(iced::Font {
@@ -204,8 +193,9 @@ pub fn view<'a>(
         .width(Length::Fill);
 
     // 3. Channel row + actions.
+    let initial = info.channel.name.chars().next().unwrap_or('?').to_uppercase().to_string();
     let channel_avatar = container(
-        text(info.channel.name.chars().next().unwrap_or('?').to_string())
+        text(initial)
             .size(16)
             .color(iced::Color::WHITE)
             .font(iced::Font {
@@ -245,7 +235,10 @@ pub fn view<'a>(
                     ..Default::default()
                 }),
         )
-        .padding([10, 16])
+        .padding([8, 16])
+        .height(Length::Fixed(36.0))
+        .align_x(Alignment::Center)
+        .align_y(Alignment::Center)
         .style(theme::solid_container(theme::WHITE, 18.0)),
     )
     .on_press(Message::SubscribeToggle)
@@ -269,11 +262,10 @@ pub fn view<'a>(
             )
             .on_press(Message::LikeToggle)
             .style(theme::ghost_button())
-            .padding([8, 12]),
-            // Vertical divider line, not a "|" character.
+            .padding([6, 12]),
             container(text("").size(1))
                 .width(Length::Fixed(1.0))
-                .height(Length::Fixed(24.0))
+                .height(Length::Fixed(20.0))
                 .style(theme::solid_container(
                     iced::Color::from_rgba(1.0, 1.0, 1.0, 0.2),
                     0.0,
@@ -281,11 +273,12 @@ pub fn view<'a>(
             button(icon("dislike", 18))
                 .on_press(Message::LikeToggle)
                 .style(theme::ghost_button())
-                .padding([8, 12]),
+                .padding([6, 12]),
         ]
         .spacing(0)
         .align_y(Alignment::Center),
     )
+    .height(Length::Fixed(36.0))
     .style(theme::solid_container(theme::CHIP_BG, 18.0));
 
     let action_pill = |icon_name: &'static str, label: &'static str| {
@@ -295,7 +288,10 @@ pub fn view<'a>(
                     .spacing(6)
                     .align_y(Alignment::Center),
             )
-            .padding([8, 16])
+            .padding([6, 16])
+            .height(Length::Fixed(36.0))
+            .align_x(Alignment::Center)
+            .align_y(Alignment::Center)
             .style(theme::solid_container(theme::CHIP_BG, 18.0)),
         )
         .style(theme::ghost_button())
@@ -329,6 +325,7 @@ pub fn view<'a>(
         ),
         None => format!("{} views", format_count(info.view_count)),
     };
+    let clean_desc = clean_text(&info.description);
     let desc_container = container(
         column![
             text(meta_line)
@@ -338,14 +335,14 @@ pub fn view<'a>(
                     ..Default::default()
                 })
                 .color(theme::TEXT),
-            text(&info.description)
+            text(clean_desc)
                 .size(14)
                 .line_height(iced::Pixels(20.0))
                 .color(theme::TEXT),
         ]
         .spacing(8),
     )
-    .padding(12)
+    .padding(14)
     .width(Length::Fill)
     .style(theme::solid_container(theme::CHIP_BG, 12.0));
 
@@ -355,7 +352,7 @@ pub fn view<'a>(
         meta_bar,
         desc_container,
     ]
-    .spacing(12)
+    .spacing(14)
     .width(Length::FillPortion(7));
 
     // 5. Right column: "Up next" chips + compact cards.
@@ -368,7 +365,7 @@ pub fn view<'a>(
 
     let mut rec_col = column![rec_chips,].spacing(12).width(Length::FillPortion(3));
 
-    for item in recommended.iter().take(10) {
+    for item in recommended.iter().take(12) {
         let thumb = thumbnails.get(&item.thumbnail_url);
         rec_col = rec_col.push(video_card::compact_view(item, thumb));
     }
@@ -402,6 +399,8 @@ fn sidebar_chip<'a>(label: &'static str, active: bool) -> Element<'a, Message> {
         }))
         .padding([0, 12])
         .height(Length::Fixed(32.0))
+        .align_x(Alignment::Center)
+        .align_y(Alignment::Center)
         .style(move |_theme: &iced::Theme| {
             container::Style {
                 background: Some(bg.into()),

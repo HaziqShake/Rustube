@@ -1,61 +1,70 @@
-use iced::widget::{button, column, container, row, text};
+use iced::widget::{button, column, container, row, scrollable, text};
 use iced::{Alignment, Element, Length};
 use crate::message::Message;
 use crate::router::Page;
 use crate::theme;
 use crate::utils::icons::icon;
 
-/// YouTube sidebar, expanded: 240px wide, items 40px tall, 24px icons,
-/// 24px icon-to-label gap, 14px labels, 10px corner radius.
-/// Hover and active both use `#272727`; active labels are Medium weight.
+/// YouTube sidebar: expanded is 240px wide, mini is 72px wide.
+/// Items are 40px tall with 24px icons and 14px labels, 10px corner radius.
 pub fn view<'a>(expanded: bool) -> Element<'a, Message> {
     if !expanded {
+        let mini_col = column![
+            sidebar_item_mini("home", "Home", Message::NavigateTo(Page::Home), true),
+            sidebar_item_mini("shorts", "Shorts", Message::NavigateTo(Page::Home), false),
+            sidebar_item_mini("subscriptions", "Subscriptions", Message::NavigateTo(Page::Subscriptions), false),
+            sidebar_item_mini("library", "You", Message::NavigateTo(Page::History), false),
+            sidebar_item_mini("downloads", "Downloads", Message::NavigateTo(Page::Downloads), false),
+        ]
+        .spacing(4)
+        .align_x(Alignment::Center)
+        .width(Length::Fixed(72.0));
+
         return container(
-            column![
-                sidebar_item_mini("home", "Home", Message::NavigateTo(Page::Home)),
-                sidebar_item_mini("shorts", "Shorts", Message::NavigateTo(Page::Home)),
-                sidebar_item_mini("subscriptions", "Subscriptions", Message::NavigateTo(Page::Subscriptions)),
-                sidebar_item_mini("library", "You", Message::NavigateTo(Page::History)),
-                sidebar_item_mini("downloads", "Downloads", Message::NavigateTo(Page::Downloads)),
-            ]
-            .spacing(0)
-            .align_x(Alignment::Center)
-            .width(Length::Fixed(72.0)),
+            scrollable(mini_col)
+                .width(Length::Fixed(72.0))
+                .height(Length::Fill),
         )
         .padding([4, 0])
+        .style(theme::solid_container(theme::BG, 0.0))
         .into();
     }
 
+    let full_col = column![
+        sidebar_item_full("home", "Home", Message::NavigateTo(Page::Home), true),
+        sidebar_item_full("shorts", "Shorts", Message::NavigateTo(Page::Home), false),
+        sidebar_item_full("subscriptions", "Subscriptions", Message::NavigateTo(Page::Subscriptions), false),
+        divider(),
+        section_header("You"),
+        sidebar_item_full("history", "History", Message::NavigateTo(Page::History), false),
+        sidebar_item_full("library", "Playlists", Message::NavigateTo(Page::History), false),
+        sidebar_item_full("downloads", "Downloads", Message::NavigateTo(Page::Downloads), false),
+        divider(),
+        section_title("Explore"),
+        sidebar_item_full("like", "Trending", Message::FilterCategorySelected("Trending".to_string()), false),
+        sidebar_item_full("volume", "Music", Message::FilterCategorySelected("Music".to_string()), false),
+        sidebar_item_full("play", "Gaming", Message::FilterCategorySelected("Gaming".to_string()), false),
+        sidebar_item_full("subtitles_cc", "News", Message::FilterCategorySelected("News".to_string()), false),
+        divider(),
+        sidebar_item_full("settings", "Settings", Message::NavigateTo(Page::Settings), false),
+    ]
+    .spacing(2)
+    .width(Length::Fixed(240.0));
+
     container(
-        column![
-            sidebar_item_full("home", "Home", Message::NavigateTo(Page::Home), true),
-            sidebar_item_full("shorts", "Shorts", Message::NavigateTo(Page::Home), false),
-            sidebar_item_full("subscriptions", "Subscriptions", Message::NavigateTo(Page::Subscriptions), false),
-            divider(),
-            section_header("You >"),
-            sidebar_item_full("history", "History", Message::NavigateTo(Page::History), false),
-            sidebar_item_full("library", "Playlists", Message::NavigateTo(Page::History), false),
-            sidebar_item_full("downloads", "Downloads", Message::NavigateTo(Page::Downloads), false),
-            divider(),
-            section_header("Explore"),
-            sidebar_item_full("logo", "Trending", Message::NavigateTo(Page::Home), false),
-            sidebar_item_full("volume", "Music", Message::NavigateTo(Page::Home), false),
-            sidebar_item_full("play", "Gaming", Message::NavigateTo(Page::Home), false),
-            sidebar_item_full("subtitles_cc", "News", Message::NavigateTo(Page::Home), false),
-            divider(),
-            sidebar_item_full("settings", "Settings", Message::NavigateTo(Page::Settings), false),
-        ]
-        .spacing(0)
-        .width(Length::Fixed(240.0)),
+        scrollable(full_col)
+            .width(Length::Fixed(240.0))
+            .height(Length::Fill),
     )
-    .padding([12, 12])
+    .padding([8, 12])
+    .style(theme::solid_container(theme::BG, 0.0))
     .into()
 }
 
-fn section_header<'a>(title: &'static str) -> Element<'a, Message> {
+fn section_title<'a>(title: &'static str) -> Element<'a, Message> {
     container(
         text(title)
-            .size(16)
+            .size(15)
             .font(iced::Font {
                 weight: iced::font::Weight::Medium,
                 ..Default::default()
@@ -68,6 +77,35 @@ fn section_header<'a>(title: &'static str) -> Element<'a, Message> {
         bottom: 4.0,
         left: 12.0,
     })
+    .into()
+}
+
+fn section_header<'a>(title: &'static str) -> Element<'a, Message> {
+    button(
+        container(
+            row![
+                text(title)
+                    .size(15)
+                    .font(iced::Font {
+                        weight: iced::font::Weight::Medium,
+                        ..Default::default()
+                    })
+                    .color(theme::TEXT),
+                icon("forward", 14),
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center),
+        )
+        .padding(iced::Padding {
+            top: 6.0,
+            right: 12.0,
+            bottom: 4.0,
+            left: 12.0,
+        }),
+    )
+    .on_press(Message::NavigateTo(Page::History))
+    .style(theme::ghost_button())
+    .padding(0)
     .into()
 }
 
@@ -112,7 +150,7 @@ fn sidebar_item_full<'a>(
     button(
         container(
             row![
-                icon(icon_name, 24),
+                icon(icon_name, 22),
                 text(label)
                     .size(14)
                     .font(iced::Font {
@@ -135,26 +173,43 @@ fn sidebar_item_full<'a>(
     .into()
 }
 
-fn sidebar_item_mini<'a>(icon_name: &'static str, label: &'static str, msg: Message) -> Element<'a, Message> {
+fn sidebar_item_mini<'a>(
+    icon_name: &'static str,
+    label: &'static str,
+    msg: Message,
+    active: bool,
+) -> Element<'a, Message> {
+    let weight = if active {
+        iced::font::Weight::Medium
+    } else {
+        iced::font::Weight::Normal
+    };
+
     button(
         container(
             column![
-                icon(icon_name, 24),
-                text(label).size(10).color(theme::TEXT),
+                icon(icon_name, 22),
+                text(label)
+                    .size(10)
+                    .font(iced::Font {
+                        weight,
+                        ..Default::default()
+                    })
+                    .color(theme::TEXT),
             ]
             .spacing(6)
             .align_x(Alignment::Center),
         )
         .padding(iced::Padding {
-            top: 16.0,
-            right: 0.0,
-            bottom: 14.0,
-            left: 0.0,
+            top: 14.0,
+            right: 4.0,
+            bottom: 12.0,
+            left: 4.0,
         })
         .width(Length::Fill),
     )
     .on_press(msg)
-    .style(item_style(false))
+    .style(item_style(active))
     .padding(0)
     .width(Length::Fill)
     .into()
@@ -167,6 +222,6 @@ fn divider<'a>() -> Element<'a, Message> {
             .width(Length::Fill)
             .style(theme::solid_container(theme::DIVIDER, 0.0)),
     )
-    .padding([12, 12])
+    .padding([8, 12])
     .into()
 }

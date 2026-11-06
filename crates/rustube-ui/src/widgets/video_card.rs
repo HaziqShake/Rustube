@@ -3,11 +3,9 @@ use iced::{Alignment, Element, Length};
 use rustube_core::youtube::models::VideoItem;
 use crate::message::Message;
 use crate::theme;
-use crate::utils::format::{format_duration, format_view_count};
+use crate::utils::format::{clean_text, format_duration, format_view_count};
 
-/// YouTube clamps titles to two lines. Iced has no line clamp, so
-/// truncate by character count as an approximation (16px Roboto in a
-/// ~340px card fits ~55 chars per line).
+/// Truncate text cleanly with ellipsis.
 fn truncate(title: &str, max_chars: usize) -> String {
     if title.chars().count() <= max_chars {
         return title.to_string();
@@ -33,9 +31,7 @@ fn duration_badge(dur_text: String, live: bool) -> Element<'static, Message> {
     .into()
 }
 
-/// 36px channel avatar: the real photo when downloaded, otherwise the
-/// initial-letter circle (same fallback YouTube shows for channels
-/// without a custom avatar).
+/// Channel avatar: real image when available, otherwise clean initial-letter circle.
 pub fn avatar<'a>(
     channel_name: &str,
     avatar_handle: Option<&'a image::Handle>,
@@ -51,9 +47,10 @@ pub fn avatar<'a>(
         .height(Length::Fixed(size))
         .into()
     } else {
+        let initial = channel_name.chars().next().unwrap_or('?').to_uppercase().to_string();
         container(
-            text(channel_name.chars().next().unwrap_or('?').to_string())
-                .size((size * 0.4) as u16)
+            text(initial)
+                .size((size * 0.42) as u16)
                 .color(iced::Color::WHITE)
                 .font(iced::Font {
                     weight: iced::font::Weight::Bold,
@@ -69,9 +66,8 @@ pub fn avatar<'a>(
     }
 }
 
-/// Standard YouTube grid video card (home feed).
-/// `thumb_height` is 16:9 of the card width, computed by the home page
-/// from the window size so the grid stays responsive.
+/// Standard YouTube grid video card (home & search feed).
+/// `thumb_height` is 16:9 of the card width so aspect ratio is preserved.
 pub fn view<'a>(
     video: &'a VideoItem,
     thumbnail: Option<&'a image::Handle>,
@@ -90,9 +86,7 @@ pub fn view<'a>(
 
     let meta_text = format!("{} • {}", views_text, video.published_text);
 
-    // Thumbnail: the image itself is pre-rounded (12px) at download time.
-    // The duration badge is stacked on top, bottom-right, 4px from the
-    // edges, instead of sitting underneath the image.
+    // 16:9 Thumbnail pre-cropped with 12px rounded corners.
     let thumb_elem: Element<'a, Message> = if let Some(handle) = thumbnail {
         container(
             image(handle.clone())
@@ -119,8 +113,8 @@ pub fn view<'a>(
             .align_y(Alignment::End)
             .padding(iced::Padding {
                 top: 0.0,
-                right: 4.0,
-                bottom: 4.0,
+                right: 6.0,
+                bottom: 6.0,
                 left: 0.0,
             }),
     ]
@@ -128,26 +122,48 @@ pub fn view<'a>(
     .height(Length::Fixed(thumb_height))
     .into();
 
-    let text_meta = column![
-        text(truncate(&video.title, 95))
-            .size(16)
-            .line_height(iced::Pixels(22.0))
+    let clean_title = clean_text(&video.title);
+    let title_display = truncate(&clean_title, 55);
+
+    let title_container = container(
+        text(title_display)
+            .size(15)
+            .line_height(iced::Pixels(20.0))
             .font(iced::Font {
                 weight: iced::font::Weight::Medium,
                 ..Default::default()
             })
             .color(theme::TEXT),
-        text(&video.channel.name).size(14).color(theme::TEXT_SECONDARY),
-        text(meta_text).size(14).color(theme::TEXT_SECONDARY),
+    )
+    .height(Length::Fixed(42.0))
+    .width(Length::Fill);
+
+    let text_meta = column![
+        title_container,
+        text(&video.channel.name)
+            .size(13)
+            .color(theme::TEXT_SECONDARY),
+        text(meta_text)
+            .size(13)
+            .color(theme::TEXT_SECONDARY),
     ]
-    .spacing(4)
+    .spacing(3)
     .width(Length::Fill);
 
     let card_content = column![
         thumbnail_view,
-        row![avatar(&video.channel.name, avatar_handle, 36.0), text_meta]
-            .spacing(12)
-            .align_y(Alignment::Start),
+        row![
+            container(avatar(&video.channel.name, avatar_handle, 36.0))
+                .padding(iced::Padding {
+                    top: 2.0,
+                    right: 0.0,
+                    bottom: 0.0,
+                    left: 0.0,
+                }),
+            text_meta,
+        ]
+        .spacing(12)
+        .align_y(Alignment::Start),
     ]
     .spacing(12);
 
@@ -212,23 +228,36 @@ pub fn compact_view<'a>(
     .height(Length::Fixed(94.0))
     .into();
 
-    let details = column![
-        text(truncate(&video.title, 60))
+    let clean_title = clean_text(&video.title);
+    let title_display = truncate(&clean_title, 48);
+
+    let title_container = container(
+        text(title_display)
             .size(14)
-            .line_height(iced::Pixels(20.0))
+            .line_height(iced::Pixels(19.0))
             .font(iced::Font {
                 weight: iced::font::Weight::Medium,
                 ..Default::default()
             })
             .color(theme::TEXT),
-        text(&video.channel.name).size(12).color(theme::TEXT_SECONDARY),
-        text(meta_text).size(12).color(theme::TEXT_SECONDARY),
+    )
+    .height(Length::Fixed(40.0))
+    .width(Length::Fill);
+
+    let details = column![
+        title_container,
+        text(&video.channel.name)
+            .size(12)
+            .color(theme::TEXT_SECONDARY),
+        text(meta_text)
+            .size(12)
+            .color(theme::TEXT_SECONDARY),
     ]
-    .spacing(4)
+    .spacing(3)
     .width(Length::Fill);
 
     let content = row![thumb_view, details]
-        .spacing(8)
+        .spacing(10)
         .align_y(Alignment::Start);
 
     button(content)

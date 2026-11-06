@@ -45,7 +45,7 @@ impl PlayerController {
 
     /// Try to find the top-level Rustube X11 window
     fn find_rustube_window() -> Option<u32> {
-        for _ in 0..15 {
+        for _ in 0..30 {
             if let Ok((conn, screen_num)) = x11rb::connect(None) {
                 let screen = conn.setup().roots.get(screen_num)?;
                 if let Ok(tree) = conn.query_tree(screen.root) {
@@ -59,7 +59,7 @@ impl PlayerController {
                                 if let Ok(cookie) = conn.get_property(false, win, net_atom, utf8_atom, 0, 1024) {
                                     if let Ok(reply) = cookie.reply() {
                                         if let Ok(title) = String::from_utf8(reply.value) {
-                                            if title.contains("Rustube - Native YouTube Client") {
+                                            if title.contains("Rustube") {
                                                 info!("Found Rustube window by _NET_WM_NAME: {:#x}", win);
                                                 return Some(win);
                                             }
@@ -72,7 +72,7 @@ impl PlayerController {
                             if let Ok(cookie) = conn.get_property(false, win, AtomEnum::WM_NAME, AtomEnum::STRING, 0, 1024) {
                                 if let Ok(reply) = cookie.reply() {
                                     if let Ok(title) = String::from_utf8(reply.value) {
-                                        if title.contains("Rustube - Native YouTube Client") {
+                                        if title.contains("Rustube") {
                                             info!("Found Rustube window by WM_NAME: {:#x}", win);
                                             return Some(win);
                                         }
@@ -83,7 +83,7 @@ impl PlayerController {
                     }
                 }
             }
-            std::thread::sleep(Duration::from_millis(150));
+            std::thread::sleep(Duration::from_millis(100));
         }
 
         None
@@ -102,6 +102,8 @@ impl PlayerController {
 
         let mut cmd = Command::new("mpv");
         cmd.arg(&yt_url)
+           .arg("--vo=gpu")
+           .arg("--gpu-context=x11")
            .arg("--hwdec=auto-safe")
            .arg("--ytdl-format=bestvideo[vcodec^=vp9][height<=1080]+bestaudio/bestvideo[vcodec^=avc1][height<=1080]+bestaudio/best[height<=1080]/best")
            .arg("--keep-open=yes")

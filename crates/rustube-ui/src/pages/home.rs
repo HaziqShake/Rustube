@@ -1,15 +1,15 @@
 use std::collections::HashMap;
-use iced::widget::{button, column, container, row, scrollable, text};
+use iced::widget::{button, column, container, row, scrollable, text, Space};
 use iced::{Element, Length};
 use rustube_core::youtube::models::VideoItem;
 use crate::message::Message;
 use crate::theme;
 use crate::widgets::video_card;
 
-/// YouTube home: 56px filter-chip bar, then a responsive grid.
-/// Columns come from the window width (cards ~310px minimum, max 5),
-/// the same way youtube.com reflows. Gaps are 16px horizontal and
-/// 36px vertical; content padding is 24px on the sides.
+/// YouTube home: 56px sticky filter-chip bar, then a responsive grid.
+/// Columns come from the window width (cards ~340px minimum, max 4),
+/// the exact same way youtube.com reflows. Gaps are 16px horizontal and
+/// 40px vertical; content padding is 24px on the sides.
 pub fn view<'a>(
     videos: &'a [VideoItem],
     thumbnails: &'a HashMap<String, iced::widget::image::Handle>,
@@ -24,13 +24,17 @@ pub fn view<'a>(
                 .size(16)
                 .color(theme::TEXT_SECONDARY),
         )
-        .padding(24)
+        .padding(32)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .align_x(iced::Alignment::Center)
+        .align_y(iced::Alignment::Center)
         .into();
     }
 
     let sidebar_w = if sidebar_expanded { 240.0 } else { 72.0 };
     let content_w = (window_width - sidebar_w - 48.0).max(320.0);
-    let columns = ((content_w / 310.0).floor() as usize).clamp(1, 5);
+    let columns = ((content_w / 330.0).floor() as usize).clamp(1, 4);
     let card_w = (content_w - (columns as f32 - 1.0) * 16.0) / columns as f32;
     let thumb_h = card_w * 9.0 / 16.0;
 
@@ -44,17 +48,23 @@ pub fn view<'a>(
         "Coding",
         "Recently uploaded",
         "Watched",
+        "Trending",
+        "New to you",
     ];
-    let mut chips = row![].spacing(12).align_y(iced::Alignment::Center);
+    let mut chips = row![].spacing(10).align_y(iced::Alignment::Center);
     for cat in categories {
         chips = chips.push(pill(cat, cat == active_category));
     }
-    let filter_bar = container(chips)
-        .padding([0, 24])
-        .height(Length::Fixed(56.0))
-        .width(Length::Fill);
+    let filter_bar = container(
+        scrollable(chips)
+            .direction(scrollable::Direction::Horizontal(scrollable::Scrollbar::new()))
+            .width(Length::Fill),
+    )
+    .padding([8, 24])
+    .height(Length::Fixed(52.0))
+    .width(Length::Fill);
 
-    let mut rows = column![].spacing(36).width(Length::Fill);
+    let mut rows = column![].spacing(40).width(Length::Fill);
     let mut current_row = row![].spacing(16).width(Length::Fill);
     let mut count = 0;
 
@@ -76,7 +86,15 @@ pub fn view<'a>(
         }
     }
 
+    // Preserve equal column widths on the final row by filling remaining slots with dummy spacers
     if count % columns != 0 {
+        let remaining = columns - (count % columns);
+        for _ in 0..remaining {
+            current_row = current_row.push(
+                container(Space::new(Length::FillPortion(1), Length::Shrink))
+                    .width(Length::FillPortion(1)),
+            );
+        }
         rows = rows.push(current_row);
     }
 
@@ -84,9 +102,9 @@ pub fn view<'a>(
         filter_bar,
         container(rows)
             .padding(iced::Padding {
-                top: 16.0,
+                top: 12.0,
                 right: 24.0,
-                bottom: 24.0,
+                bottom: 32.0,
                 left: 24.0,
             })
             .width(Length::Fill),
@@ -120,40 +138,22 @@ fn pill<'a>(label: &'static str, active: bool) -> Element<'a, Message> {
     };
 
     button(
-        container(text(label).size(14).color(fg).font(iced::Font {
-            weight,
-            ..Default::default()
-        }))
-        .padding([0, 12])
-        .height(Length::Fixed(32.0))
-        .style(move |_theme: &iced::Theme| {
-            container::Style {
-                background: Some(bg.into()),
-                border: iced::Border {
-                    radius: 8.0.into(),
+        container(
+            text(label)
+                .size(14)
+                .color(fg)
+                .font(iced::Font {
+                    weight,
                     ..Default::default()
-                },
-                ..Default::default()
-            }
-        }),
+                }),
+        )
+        .padding([6, 12])
+        .height(Length::Fixed(32.0))
+        .align_x(iced::Alignment::Center)
+        .align_y(iced::Alignment::Center),
     )
     .on_press(Message::FilterCategorySelected(label.to_string()))
-    .style(move |_theme: &iced::Theme, status: button::Status| {
-        // Hover state lives on the button; the container paints the base.
-        let background = match status {
-            button::Status::Hovered | button::Status::Pressed => hover_bg,
-            _ => bg,
-        };
-        button::Style {
-            background: Some(background.into()),
-            text_color: fg,
-            border: iced::Border {
-                radius: 8.0.into(),
-                ..Default::default()
-            },
-            ..Default::default()
-        }
-    })
+    .style(theme::pill_button(bg, hover_bg, 8.0))
     .padding(0)
     .into()
 }
