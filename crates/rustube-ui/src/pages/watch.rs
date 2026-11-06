@@ -353,7 +353,8 @@ pub fn view<'a>(
         desc_container,
     ]
     .spacing(14)
-    .width(Length::FillPortion(7));
+    .width(Length::FillPortion(7))
+    .max_width(1280.0);
 
     // 5. Right column: "Up next" chips + compact cards.
     let rec_chips = row![

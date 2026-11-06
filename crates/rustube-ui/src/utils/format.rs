@@ -19,22 +19,17 @@ pub fn format_view_count(views: u64) -> String {
 
 /// Compact count without a suffix, e.g. `1.8M` for likes,
 /// `4.56M subscribers` is built from this in the watch page.
+/// Always formatted to strictly 1 decimal place for K/M/B suffixes.
 pub fn format_count(count: u64) -> String {
     if count >= 1_000_000_000 {
-        trim_float(count as f64 / 1_000_000_000.0, "B")
+        format!("{:.1}B", count as f64 / 1_000_000_000.0)
     } else if count >= 1_000_000 {
-        trim_float(count as f64 / 1_000_000.0, "M")
+        format!("{:.1}M", count as f64 / 1_000_000.0)
     } else if count >= 1_000 {
-        trim_float(count as f64 / 1_000.0, "K")
+        format!("{:.1}K", count as f64 / 1_000.0)
     } else {
         format!("{}", count)
     }
-}
-
-fn trim_float(value: f64, suffix: &str) -> String {
-    let s = format!("{:.2}", value);
-    let s = s.trim_end_matches('0').trim_end_matches('.');
-    format!("{}{}", s, suffix)
 }
 
 pub fn format_subscriber_count(count: u64) -> String {

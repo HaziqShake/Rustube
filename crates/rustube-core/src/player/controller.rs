@@ -1,9 +1,12 @@
 use std::process::{Child, Command};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tracing::info;
 use x11rb::connection::Connection;
 use x11rb::protocol::xproto::{AtomEnum, ConfigureWindowAux, ConnectionExt, CreateWindowAux, WindowClass};
+
+static CACHED_WINDOW: AtomicU32 = AtomicU32::new(0);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlayerState {
@@ -28,6 +31,7 @@ struct X11State {
     child_window: u32,
 }
 
+#[derive(Clone)]
 pub struct PlayerController {
     state: Arc<Mutex<PlayerState>>,
     child: Arc<Mutex<Option<Child>>>,
@@ -43,23 +47,45 @@ impl PlayerController {
         }
     }
 
-    /// Try to find the top-level Rustube X11 window
-    fn find_rustube_window() -> Option<u32> {
-        for _ in 0..30 {
+    /// Try to find the top-level Rustube X11 window.
+    /// Uses cached window ID if already discovered to prevent repeated X11 traversal.
+    pub fn find_rustube_window() -> Option<u32> {
+        let cached = CACHED_WINDOW.load(Ordering::Relaxed);
+        if cached != 0 {
+            return Some(cached);
+        }
+
+        let my_pid = std::process::id();
+
+        for _ in 0..10 {
             if let Ok((conn, screen_num)) = x11rb::connect(None) {
-                let screen = conn.setup().roots.get(screen_num)?;
-                if let Ok(tree) = conn.query_tree(screen.root) {
-                    if let Ok(reply) = tree.reply() {
+                if let Some(screen) = conn.setup().roots.get(screen_num) {
+                    if let Some(tree) = conn.query_tree(screen.root).ok().and_then(|c| c.reply().ok()) {
+                        let pid_atom = conn.intern_atom(false, b"_NET_WM_PID").ok().and_then(|c| c.reply().ok()).map(|r| r.atom);
                         let net_wm_name_atom = conn.intern_atom(false, b"_NET_WM_NAME").ok().and_then(|c| c.reply().ok()).map(|r| r.atom);
                         let utf8_string_atom = conn.intern_atom(false, b"UTF8_STRING").ok().and_then(|c| c.reply().ok()).map(|r| r.atom);
 
-                        for &win in reply.children.iter().rev() {
-                            // Check _NET_WM_NAME
+                        for &win in tree.children.iter().rev() {
+                            // 1. First priority: match by PID
+                            if let Some(pid_atom) = pid_atom {
+                                if let Some(prop) = conn.get_property(false, win, pid_atom, AtomEnum::CARDINAL, 0, 1).ok().and_then(|c| c.reply().ok()) {
+                                    if let Some(pid) = prop.value32().and_then(|mut v| v.next()) {
+                                        if pid == my_pid {
+                                            CACHED_WINDOW.store(win, Ordering::Relaxed);
+                                            info!("Found Rustube window by PID {}: {:#x}", my_pid, win);
+                                            return Some(win);
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 2. Second priority: match by _NET_WM_NAME
                             if let (Some(net_atom), Some(utf8_atom)) = (net_wm_name_atom, utf8_string_atom) {
                                 if let Ok(cookie) = conn.get_property(false, win, net_atom, utf8_atom, 0, 1024) {
                                     if let Ok(reply) = cookie.reply() {
                                         if let Ok(title) = String::from_utf8(reply.value) {
                                             if title.contains("Rustube") {
+                                                CACHED_WINDOW.store(win, Ordering::Relaxed);
                                                 info!("Found Rustube window by _NET_WM_NAME: {:#x}", win);
                                                 return Some(win);
                                             }
@@ -68,11 +94,12 @@ impl PlayerController {
                                 }
                             }
 
-                            // Check WM_NAME
+                            // 3. Fallback: match by WM_NAME
                             if let Ok(cookie) = conn.get_property(false, win, AtomEnum::WM_NAME, AtomEnum::STRING, 0, 1024) {
                                 if let Ok(reply) = cookie.reply() {
                                     if let Ok(title) = String::from_utf8(reply.value) {
                                         if title.contains("Rustube") {
+                                            CACHED_WINDOW.store(win, Ordering::Relaxed);
                                             info!("Found Rustube window by WM_NAME: {:#x}", win);
                                             return Some(win);
                                         }
@@ -83,7 +110,7 @@ impl PlayerController {
                     }
                 }
             }
-            std::thread::sleep(Duration::from_millis(100));
+            std::thread::sleep(Duration::from_millis(30));
         }
 
         None
@@ -105,6 +132,7 @@ impl PlayerController {
            .arg("--vo=gpu")
            .arg("--gpu-context=x11")
            .arg("--hwdec=auto-safe")
+           .arg("--force-window=immediate")
            .arg("--ytdl-format=bestvideo[vcodec^=vp9][height<=1080]+bestaudio/bestvideo[vcodec^=avc1][height<=1080]+bestaudio/best[height<=1080]/best")
            .arg("--keep-open=yes")
            .arg("--input-ipc-server=/tmp/rustube_mpv.sock")
@@ -170,11 +198,7 @@ impl PlayerController {
 
     /// Legacy compat method
     pub fn play_embedded(&self, video_id: &str) -> anyhow::Result<()> {
-        // Default player area coordinates on 1440x900 window
-        // Top bar is ~56px + padding ~12px => y=74
-        // Sidebar/left margin is 20px => x=20
-        // Width for FillPortion(7) on 1440px is approx 920px, height for 16:9 is 518px
-        self.play_embedded_at(video_id, 20, 74, 920, 518)
+        self.play_embedded_at(video_id, 24, 80, 920, 518)
     }
 
     fn stop_internal(&self) {
@@ -201,11 +225,6 @@ impl PlayerController {
         *state = PlayerState::Stopped;
     }
 
-    pub fn is_playing(&self) -> bool {
-        let state = self.state.lock().unwrap();
-        *state == PlayerState::Playing
-    }
-
     pub fn toggle_pause(&self) {
         Self::send_ipc(r#"{"command": ["cycle", "pause"]}"#);
     }
@@ -226,11 +245,8 @@ impl PlayerController {
         Self::send_ipc(r#"{"command": ["cycle", "fullscreen"]}"#);
     }
 
-    /// Query live playback state from MPV over the IPC socket.
-    /// Returns (position_secs, duration_secs, paused). Each property is a
-    /// separate short-lived connection with a 300ms read timeout, so a
-    /// dead or busy MPV never blocks the UI thread for long.
-    /// `None` per field means "unknown right now", not an error.
+    /// Query current playback state over MPV IPC without blocking the UI thread.
+    /// Timeouts are clamped to 15ms.
     pub fn query_state(&self) -> (Option<f64>, Option<f64>, Option<bool>) {
         (
             Self::get_property_f64("time-pos"),
@@ -253,8 +269,8 @@ impl PlayerController {
         use std::time::Duration as StdDuration;
 
         let mut stream = UnixStream::connect("/tmp/rustube_mpv.sock").ok()?;
-        let _ = stream.set_read_timeout(Some(StdDuration::from_millis(300)));
-        let _ = stream.set_write_timeout(Some(StdDuration::from_millis(300)));
+        let _ = stream.set_read_timeout(Some(StdDuration::from_millis(15)));
+        let _ = stream.set_write_timeout(Some(StdDuration::from_millis(15)));
         let cmd = format!(
             r#"{{"command": ["get_property", "{}"], "request_id": 1}}"#,
             name
@@ -264,7 +280,7 @@ impl PlayerController {
         let mut reader = BufReader::new(stream);
         let mut line = String::new();
         // MPV answers each request with exactly one JSON object.
-        for _ in 0..5 {
+        for _ in 0..3 {
             line.clear();
             if reader.read_line(&mut line).ok()? == 0 {
                 return None;

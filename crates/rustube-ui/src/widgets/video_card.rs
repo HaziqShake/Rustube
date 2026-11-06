@@ -267,3 +267,127 @@ pub fn compact_view<'a>(
         .width(Length::Fill)
         .into()
 }
+
+/// High-fidelity YouTube grid skeleton card for loading states.
+/// Preserves exact 16:9 ratio, 12px rounded thumbnail, 36px circular avatar,
+/// and realistic 2-line title + channel/meta skeleton bars.
+pub fn skeleton<'a>(thumb_height: f32) -> Element<'a, Message> {
+    // 16:9 Thumbnail placeholder with 12px rounded corners
+    let thumb = container(text("").size(1))
+        .width(Length::Fill)
+        .height(Length::Fixed(thumb_height))
+        .style(theme::solid_container(theme::THUMB_PLACEHOLDER, 12.0));
+
+    // Circular avatar placeholder (36x36, 18px radius)
+    let avatar_skeleton = container(text("").size(1))
+        .width(Length::Fixed(36.0))
+        .height(Length::Fixed(36.0))
+        .style(theme::solid_container(theme::CHIP_BG, 18.0));
+
+    // Title line 1: ~90% width, 14px high, 4px radius
+    let title_line1 = container(text("").size(1))
+        .width(Length::FillPortion(9))
+        .height(Length::Fixed(14.0))
+        .style(theme::solid_container(theme::CHIP_BG, 4.0));
+
+    // Title line 2: ~60% width, 14px high, 4px radius
+    let title_line2 = container(text("").size(1))
+        .width(Length::FillPortion(6))
+        .height(Length::Fixed(14.0))
+        .style(theme::solid_container(theme::CHIP_BG, 4.0));
+
+    // Channel name placeholder: ~45% width, 12px high, 4px radius
+    let channel_line = container(text("").size(1))
+        .width(Length::FillPortion(4))
+        .height(Length::Fixed(12.0))
+        .style(theme::solid_container(theme::CHIP_BG, 4.0));
+
+    // Views / meta placeholder: ~30% width, 12px high, 4px radius
+    let meta_line = container(text("").size(1))
+        .width(Length::FillPortion(3))
+        .height(Length::Fixed(12.0))
+        .style(theme::solid_container(theme::CHIP_BG, 4.0));
+
+    let title_block = column![
+        row![title_line1, container(text("").size(1)).width(Length::FillPortion(1))],
+        row![title_line2, container(text("").size(1)).width(Length::FillPortion(4))],
+    ]
+    .spacing(6)
+    .width(Length::Fill);
+
+    let text_meta = column![
+        title_block,
+        row![channel_line, container(text("").size(1)).width(Length::FillPortion(5))],
+        row![meta_line, container(text("").size(1)).width(Length::FillPortion(7))],
+    ]
+    .spacing(6)
+    .width(Length::Fill);
+
+    let content = column![
+        thumb,
+        row![
+            container(avatar_skeleton).padding(iced::Padding {
+                top: 2.0,
+                right: 0.0,
+                bottom: 0.0,
+                left: 0.0,
+            }),
+            text_meta,
+        ]
+        .spacing(12)
+        .align_y(Alignment::Start),
+    ]
+    .spacing(12);
+
+    container(content)
+        .width(Length::Fill)
+        .into()
+}
+
+/// Compact skeleton card for watch page sidebar recommendations.
+pub fn compact_skeleton<'a>() -> Element<'a, Message> {
+    let thumb = container(text("").size(1))
+        .width(Length::Fixed(168.0))
+        .height(Length::Fixed(94.0))
+        .style(theme::solid_container(theme::THUMB_PLACEHOLDER, 8.0));
+
+    let title_line1 = container(text("").size(1))
+        .width(Length::FillPortion(9))
+        .height(Length::Fixed(13.0))
+        .style(theme::solid_container(theme::CHIP_BG, 4.0));
+
+    let title_line2 = container(text("").size(1))
+        .width(Length::FillPortion(5))
+        .height(Length::Fixed(13.0))
+        .style(theme::solid_container(theme::CHIP_BG, 4.0));
+
+    let channel_line = container(text("").size(1))
+        .width(Length::FillPortion(4))
+        .height(Length::Fixed(11.0))
+        .style(theme::solid_container(theme::CHIP_BG, 4.0));
+
+    let meta_line = container(text("").size(1))
+        .width(Length::FillPortion(3))
+        .height(Length::Fixed(11.0))
+        .style(theme::solid_container(theme::CHIP_BG, 4.0));
+
+    let details = column![
+        column![
+            row![title_line1, container(text("").size(1)).width(Length::FillPortion(1))],
+            row![title_line2, container(text("").size(1)).width(Length::FillPortion(5))],
+        ]
+        .spacing(5),
+        row![channel_line, container(text("").size(1)).width(Length::FillPortion(5))],
+        row![meta_line, container(text("").size(1)).width(Length::FillPortion(6))],
+    ]
+    .spacing(5)
+    .width(Length::Fill);
+
+    container(
+        row![thumb, details]
+            .spacing(10)
+            .align_y(Alignment::Start),
+    )
+    .width(Length::Fill)
+    .into()
+}

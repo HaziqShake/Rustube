@@ -64,12 +64,24 @@ impl RustubeApp {
             let mut r = Router::new();
             r.navigate_to(Page::Watch(video_id.clone()));
             let (x, y, w, h) = player_stage_geometry(Size::new(1440.0, 900.0));
-            let _ = player.play_embedded_at(&video_id, x, y, w, h);
+            let player_clone = player.clone();
+            let vid = video_id.clone();
+            let start_player = Task::perform(
+                async move {
+                    tokio::task::spawn_blocking(move || {
+                        let _ = player_clone.play_embedded_at(&vid, x, y, w, h);
+                    })
+                    .await
+                    .ok();
+                },
+                |_| Message::Noop,
+            );
             let yt_clone = youtube.clone();
             let yt_clone2 = youtube.clone();
             (
                 r,
                 Task::batch([
+                    start_player,
                     Task::perform(
                         async move {
                             yt_clone
@@ -303,7 +315,18 @@ impl RustubeApp {
                 self.player_duration = 0.0;
                 self.player_paused = false;
                 let (x, y, w, h) = player_stage_geometry(self.window_size);
-                let _ = self.player.play_embedded_at(&id, x, y, w, h);
+                let player = self.player.clone();
+                let vid = id.clone();
+                let start_player = Task::perform(
+                    async move {
+                        tokio::task::spawn_blocking(move || {
+                            let _ = player.play_embedded_at(&vid, x, y, w, h);
+                        })
+                        .await
+                        .ok();
+                    },
+                    |_| Message::Noop,
+                );
                 let yt = self.youtube.clone();
                 let fetch_details = Task::perform(
                     async move {
@@ -323,9 +346,9 @@ impl RustubeApp {
                         },
                         Message::TrendingLoaded,
                     );
-                    Task::batch([fetch_details, fetch_trending])
+                    Task::batch([start_player, fetch_details, fetch_trending])
                 } else {
-                    fetch_details
+                    Task::batch([start_player, fetch_details])
                 }
             }
             Message::VideoDetailsLoaded(Ok(details)) => {
@@ -434,6 +457,7 @@ impl RustubeApp {
             row![sidebar::view(self.sidebar_expanded), main_view]
                 .spacing(0)
                 .width(Length::Fill)
+                .height(Length::Fill)
                 .into()
         };
 

@@ -6,7 +6,7 @@ use crate::theme;
 use crate::utils::icons::icon;
 
 /// YouTube sidebar: expanded is 240px wide, mini is 72px wide.
-/// Items are 40px tall with 24px icons and 14px labels, 10px corner radius.
+/// Items are 40px tall with 22px icons and 14px labels, 10px corner radius.
 pub fn view<'a>(expanded: bool) -> Element<'a, Message> {
     if !expanded {
         let mini_col = column![
@@ -25,6 +25,7 @@ pub fn view<'a>(expanded: bool) -> Element<'a, Message> {
                 .width(Length::Fixed(72.0))
                 .height(Length::Fill),
         )
+        .height(Length::Fill)
         .padding([4, 0])
         .style(theme::solid_container(theme::BG, 0.0))
         .into();
@@ -56,6 +57,7 @@ pub fn view<'a>(expanded: bool) -> Element<'a, Message> {
             .width(Length::Fixed(240.0))
             .height(Length::Fill),
     )
+    .height(Length::Fill)
     .padding([8, 12])
     .style(theme::solid_container(theme::BG, 0.0))
     .into()
@@ -77,6 +79,7 @@ fn section_title<'a>(title: &'static str) -> Element<'a, Message> {
         bottom: 4.0,
         left: 12.0,
     })
+    .align_y(Alignment::Center)
     .into()
 }
 
@@ -96,12 +99,8 @@ fn section_header<'a>(title: &'static str) -> Element<'a, Message> {
             .spacing(8)
             .align_y(Alignment::Center),
         )
-        .padding(iced::Padding {
-            top: 6.0,
-            right: 12.0,
-            bottom: 4.0,
-            left: 12.0,
-        }),
+        .padding([5, 12])
+        .align_y(Alignment::Center),
     )
     .on_press(Message::NavigateTo(Page::History))
     .style(theme::ghost_button())
@@ -164,6 +163,7 @@ fn sidebar_item_full<'a>(
         )
         .padding([0, 12])
         .height(Length::Fixed(40.0))
+        .align_y(Alignment::Center)
         .width(Length::Fill),
     )
     .on_press(msg)
@@ -206,6 +206,8 @@ fn sidebar_item_mini<'a>(
             bottom: 12.0,
             left: 4.0,
         })
+        .align_x(Alignment::Center)
+        .align_y(Alignment::Center)
         .width(Length::Fill),
     )
     .on_press(msg)
